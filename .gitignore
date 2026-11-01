@@ -1,0 +1,14 @@
+node_modules/
+.DS_Store
+Thumbs.db
+*.log
+
+# Participant recordings and exported projects stay out of the repo by default
+/data/
+tracefield-*.json
+*.wav
+*.mp3
+*.flac
+*.ogg
+*.m4a
+*.aac
