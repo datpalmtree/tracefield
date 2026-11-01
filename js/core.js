@@ -80,7 +80,7 @@ function download(name, data, type = 'text/plain') {
   const blob = data instanceof Blob ? data : new Blob([data], { type });
   const a = el('a', { href: URL.createObjectURL(blob), download: name });
   document.body.append(a); a.click();
-  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 60000);
 }
 
 function toast(msg, kind = '', ms = 3200) {

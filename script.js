@@ -182,43 +182,53 @@ const App = {
     const assets = {};
     for (const it of S.items) if (it.asset && ASSETS.has(it.asset)) assets[it.asset] = ASSETS.get(it.asset);
     const used = [...AudioLib.used()].filter(id => AUDIO.has(id));
-    const bytes = used.reduce((s, id) => s + AUDIO.get(id).size, 0);
-    // the project file is opened with one JSON.parse, which browsers cap near 512 MB of text
-    if (bytes > 360e6 && !confirm(`This project holds ${Math.round(bytes / 1e6)} MB of audio, which may be too large to open again in one file. Export anyway?`)) return;
     this.setBusy('Packing project…');
     try {
-      const parts = [`{"app":"tracefield","version":2,"state":${JSON.stringify(S)},"assets":${JSON.stringify(assets)},"audio":{`];
-      for (let i = 0; i < used.length; i++) {
-        const { blob, ...meta } = AUDIO.get(used[i]);
-        parts.push(`${i ? ',' : ''}${JSON.stringify(used[i])}:${JSON.stringify({ ...meta, data: await AudioLib.toDataUrl(blob) })}`);
+      // header line, JSON, then raw audio: composing Blobs leaves the audio on disk, so size costs no memory
+      const audio = {}, blobs = [];
+      let at = 0;
+      for (const id of used) {
+        const { blob, ...meta } = AUDIO.get(id);
+        audio[id] = { ...meta, at, size: blob.size };
+        blobs.push(blob);
+        at += blob.size;
       }
-      parts.push('}}');
-      download(`tracefield-${this.stamp()}.json`, new Blob(parts, { type: 'application/json' }));
+      const head = new TextEncoder().encode(JSON.stringify({ app: 'tracefield', version: 3, state: S, assets, audio }));
+      download(`tracefield-${this.stamp()}.tracefield`, new Blob([`TRACEFIELD3 ${head.length}\n`, head, ...blobs], { type: 'application/octet-stream' }));
       toast(used.length ? `Project exported with ${used.length} recording${used.length > 1 ? 's' : ''}. Share it only as your consent terms allow.` : 'Project exported (images included).', 'good', 5000);
     } catch (err) { console.error(err); toast('Export failed: ' + err.message, 'bad', 6000); }
     this.setBusy(null);
   },
   async importProject(file, quiet) {
     try {
-      const data = JSON.parse(await file.text());
+      const line = (await file.slice(0, 64).text()).match(/^TRACEFIELD3 (\d+)\n/);
+      const start = line ? line[0].length : 0, end = line ? start + +line[1] : 0;
+      const data = JSON.parse(await (line ? file.slice(start, end) : file).text());
       if (data.app !== 'tracefield') throw new Error('not a Tracefield project file');
+      const clips = Object.values(data.audio || {});
+      if (line && file.size !== end + clips.reduce((s, c) => s + c.size, 0)) throw new Error('the file is incomplete, so the download or copy may have been cut short');
       if (!quiet && S.items.length && !confirm('Replace the current board with this project? (Export first if you want to keep it.)')) return;
+      this.setBusy('Opening project…');
       Scape.dropAll();
       ASSETS.clear(); await Store.clear('assets');
       AUDIO.clear(); await Store.clear('audio');
       for (const [id, a] of Object.entries(data.assets || {})) { ASSETS.set(id, a); Store.put('assets', id, a); }
-      for (const [id, { data: url, ...meta }] of Object.entries(data.audio || {})) {
-        const a = { ...meta, blob: AudioLib.fromDataUrl(url) };
-        AUDIO.set(id, a); Store.put('audio', id, a);
+      for (const [id, { data: url, at, ...meta }] of Object.entries(data.audio || {})) {
+        const a = { ...meta, blob: line ? file.slice(end + at, end + at + meta.size, meta.type) : AudioLib.fromDataUrl(url) };
+        await Store.put('audio', id, a);
+        // prefer the stored copy so playback no longer depends on the project file staying where it is
+        AUDIO.set(id, await Store.get('audio', id) || a);
       }
       const f = freshState();
       S = { ...f, ...data.state, settings: { ...f.settings, ...(data.state.settings || {}) }, atlas: { ...f.atlas, ...(data.state.atlas || {}) }, geo: { ...f.geo, ...(data.state.geo || {}) } };
+      await AudioLib.merge();
       document.documentElement.dataset.theme = S.settings.theme; Theme.read();
       Board.rebuildAll(); Library.render(); Hist.reset(); saveNow();
       Atlas.rebuild();
       Board.fit();
       toast('Project loaded.', 'good');
     } catch (err) { toast('Could not open project: ' + err.message, 'bad', 5000); }
+    this.setBusy(null);
   },
 
   csvRow: vals => vals.map(v => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }).join(','),
@@ -325,7 +335,7 @@ const App = {
     const r = btn.getBoundingClientRect();
     Menu.show(r.right - 230, r.bottom + 8, [
       { header: 'Project' },
-      { label: 'Export project (.json)', icon: 'download', kbd: 'Ctrl S', action: () => this.exportProject() },
+      { label: 'Export project', icon: 'download', kbd: 'Ctrl S', action: () => this.exportProject() },
       { label: 'Open project…', icon: 'upload', action: () => $('#project-input').click() },
       { label: 'Load demo data', icon: 'sparkle', action: () => this.loadDemo() },
       { label: 'Load sound map demo', icon: 'earth', action: () => Atlas.loadDemo() },
@@ -404,6 +414,7 @@ function wireUI() {
         S = { ...f, ...data, settings: { ...f.settings, ...(data.settings || {}) }, atlas: { ...f.atlas, ...(data.atlas || {}) }, geo: { ...f.geo, ...(data.geo || {}) } };
       }
       await AudioLib.load();
+      if (await AudioLib.merge()) saveNow();
       const used = new Set(S.items.map(i => i.asset).filter(Boolean));
       for (const k of (await Store.keys('assets')) || []) {
         if (!used.has(k)) { Store.del('assets', k); continue; }
@@ -425,7 +436,7 @@ function wireUI() {
   Atlas.setMix(S.geo.mix ?? 1);
   document.body.classList.add('ready');
 
-  // ?project=study.json loads a hosted project without touching this browser's saved work; ?exhibit opens it for visitors
+  // ?project=study.tracefield loads a hosted project without touching this browser's saved work; ?exhibit opens it for visitors
   const q = new URLSearchParams(location.search);
   if (q.has('project')) {
     Store.db = null;

@@ -6,6 +6,7 @@ Thumbs.db
 # Participant recordings and exported projects stay out of the repo by default
 /data/
 tracefield-*.json
+*.tracefield
 *.wav
 *.mp3
 *.flac

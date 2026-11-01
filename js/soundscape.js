@@ -12,7 +12,26 @@ const AudioLib = {
   EXT: /\.(wav|wave|mp3|m4a|mp4|aac|ogg|oga|opus|flac|webm|aif|aiff)$/i,
   isAudio(f) { return f.type.startsWith('audio/') || this.EXT.test(f.name); },
 
+  async sameBytes(x, y) {
+    const STEP = 8e6;
+    try {
+      for (let at = 0; at < x.size; at += STEP) {
+        const [p, q] = await Promise.all([x, y].map(b => b.slice(at, at + STEP).arrayBuffer()));
+        const P = new Uint8Array(p), Q = new Uint8Array(q);
+        for (let i = 0; i < P.length; i++) if (P[i] !== Q[i]) return false;
+      }
+      return x.size === y.size;
+    } catch { return false; }
+  },
+
+  /** Points sharing an id each still get their own player, so sharing cannot affect playback. */
   async add(file) {
+    for (const [id, known] of AUDIO) {
+      if (known.size === file.size && await this.sameBytes(known.blob, file)) {
+        toast(`${file.name} is already in this project, so it shares that copy.`);
+        return id;
+      }
+    }
     const a = { blob: file, name: file.name, type: file.type, size: file.size, dur: 0, peaks: null };
     await this.analyse(a);
     const id = uid('s');
@@ -70,10 +89,22 @@ const AudioLib = {
     }
   },
 
-  /** Project-file form: base64 kept per clip so no single string gets too long. */
-  toDataUrl(blob) {
-    return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(r.error); r.readAsDataURL(blob); });
+  /** Repoints points at one copy of identical files. Stored spares go at the next load(), after the state has saved. */
+  async merge() {
+    const kept = [], repoint = new Map();
+    for (const id of this.used()) {
+      const a = AUDIO.get(id);
+      if (!a) continue;
+      let same = null;
+      for (const k of kept) if (AUDIO.get(k).size === a.size && await this.sameBytes(AUDIO.get(k).blob, a.blob)) { same = k; break; }
+      if (same) repoint.set(id, same); else kept.push(id);
+    }
+    for (const p of S.atlas.places) for (const slot of ['audio', 'felt']) if (repoint.has(p[slot])) p[slot] = repoint.get(p[slot]);
+    for (const id of repoint.keys()) AUDIO.delete(id);
+    return repoint.size;
   },
+
+  /** Older .json project files hold their audio as base64. */
   fromDataUrl(url) {
     const [head, b64] = url.split(','), bin = atob(b64), arr = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
