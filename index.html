@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Tracefield — plot-map lab</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27%3E%3Cpath d=%27M5 15c3-9 5-9 7-4s4 6 8-6%27 fill=%27none%27 stroke=%27%23c6ff3d%27 stroke-width=%273%27 stroke-linecap=%27round%27/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&family=Caveat:wght@500;700&display=swap" rel="stylesheet">
@@ -61,11 +62,29 @@
     <symbol id="i-frame" viewBox="0 0 24 24"><path d="M6 2v14a2 2 0 0 0 2 2h14M18 22V8a2 2 0 0 0-2-2H2"/></symbol>
     <symbol id="i-pipette" viewBox="0 0 24 24"><path d="m2 22 1-1h3l9-9M3 21v-3l9-9M15 6l3.4-3.4a2.1 2.1 0 1 1 3 3L18 9l.4.4a2.1 2.1 0 1 1-3 3l-3.8-3.8a2.1 2.1 0 1 1 3-3l.4.4Z"/></symbol>
     <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 22s7-6.5 7-12a7 7 0 1 0-14 0c0 5.5 7 12 7 12Z"/><circle cx="12" cy="10" r="2.5"/></symbol>
+    <symbol id="i-region" viewBox="0 0 24 24"><path d="m4 8 7-4 9 5-2 9-10 2-4-6Z" stroke-dasharray="3 2.5"/><circle cx="4" cy="8" r="1.4" fill="currentColor"/><circle cx="20" cy="9" r="1.4" fill="currentColor"/><circle cx="8" cy="20" r="1.4" fill="currentColor"/></symbol>
+    <symbol id="i-map" viewBox="0 0 24 24"><path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3zM9 3v15M15 6v15"/></symbol>
+    <symbol id="i-earth" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.5"/><path d="M2.5 12h19M12 2.5c2.8 2.6 4.2 5.8 4.2 9.5s-1.4 6.9-4.2 9.5c-2.8-2.6-4.2-5.8-4.2-9.5s1.4-6.9 4.2-9.5Z"/></symbol>
+    <symbol id="i-wave" viewBox="0 0 24 24"><path d="M3 10v4M7.5 6v12M12 3v18M16.5 7v10M21 10v4" stroke-width="2.2"/></symbol>
+    <symbol id="i-walk" viewBox="0 0 24 24"><circle cx="13" cy="4" r="2"/><path d="m8 22 3.5-7 3 3v4M7 12l2.5-4 4-.5 2.5 3.5 3 1M11.5 15 10 9"/></symbol>
+    <symbol id="i-route" viewBox="0 0 24 24"><circle cx="6" cy="19" r="2.5"/><circle cx="18" cy="5" r="2.5"/><path d="M8.5 19H15a3.5 3.5 0 0 0 0-7H9a3.5 3.5 0 0 1 0-7h6.5"/></symbol>
   </defs>
 </svg>
 
 <header id="topbar">
   <div class="brand"><svg class="ic logo"><use href="#i-logo"/></svg><b>Tracefield</b><em>plot-map lab</em></div>
+  <button class="btn" id="btn-bg" title="Change the background: pinboard, maps, satellite, Earth"><svg class="ic"><use href="#i-earth"/></svg><span>Pinboard</span></button>
+  <div class="tools" id="atlas-tools">
+    <button class="tbtn" data-gtool="select" title="Select, move and pan (V)"><svg class="ic"><use href="#i-select"/></svg></button>
+    <button class="tbtn" data-gtool="point" title="Add a sound point (A)"><svg class="ic"><use href="#i-pin"/></svg></button>
+    <button class="tbtn" data-gtool="region" title="Outline a region (R)"><svg class="ic"><use href="#i-region"/></svg></button>
+    <button class="tbtn" data-gtool="link" title="Link points and graphs: drag from one to another (C)"><svg class="ic"><use href="#i-link"/></svg></button>
+    <span class="tsep"></span>
+    <button class="btn" id="btn-walk" title="Soundwalk: wander the map and hear each place fade in (W)"><svg class="ic"><use href="#i-walk"/></svg><span>Soundwalk</span></button>
+    <button class="btn" id="btn-journey" title="Journey: fly from stop to stop along your arrows (J)"><svg class="ic"><use href="#i-route"/></svg><span>Journey</span></button>
+    <button class="btn" id="btn-exhibit" title="Exhibit: hide the editing tools for visitors (X)"><svg class="ic"><use href="#i-sparkle"/></svg><span>Exhibit</span></button>
+  </div>
   <div class="tools" id="tools">
     <button class="tbtn" data-tool="select" title="Select & move (V)"><svg class="ic"><use href="#i-select"/></svg></button>
     <button class="tbtn" data-tool="hand" title="Pan (H) — or hold the middle mouse button / Space"><svg class="ic"><use href="#i-hand"/></svg></button>
@@ -109,12 +128,48 @@
       <div class="w-actions">
         <button class="btn primary big" id="welcome-import"><svg class="ic"><use href="#i-upload"/></svg><span>Import scans</span></button>
         <button class="btn big" id="welcome-demo"><svg class="ic"><use href="#i-sparkle"/></svg><span>Explore demo data</span></button>
+        <button class="btn big" id="welcome-map"><svg class="ic"><use href="#i-earth"/></svg><span>Sound map demo</span></button>
         <button class="btn ghost big" id="welcome-help"><svg class="ic"><use href="#i-help"/></svg><span>How it works</span></button>
       </div>
       <small>Middle-mouse drag to pan · wheel to zoom · or just drop files anywhere</small>
     </div>
   </div>
 </main>
+
+<section id="atlas" aria-label="Map">
+  <div id="geo-map"></div>
+  <div id="geo-catch" hidden></div>
+  <canvas id="geo-fx"></canvas>
+  <svg id="geo-svg"></svg>
+  <div id="geo-layer"></div>
+  <div id="geo-search">
+    <label class="search"><svg class="ic"><use href="#i-search"/></svg><input id="geo-q" type="search" placeholder="Search for a place, then press Enter"></label>
+    <div id="geo-results" hidden></div>
+  </div>
+  <div id="geo-hint" hidden>
+    <b>Place your soundscapes.</b>
+    <span>Drop a sound file on the map, press <kbd>A</kbd> to add a point, or drag a graph over from the library.</span>
+    <button class="btn" id="hint-demo"><svg class="ic"><use href="#i-sparkle"/></svg><span>Load the sound demo</span></button>
+  </div>
+  <div id="geo-caption" hidden>
+    <small id="gc-count"></small>
+    <h2 id="gc-name"></h2>
+    <em id="gc-who"></em>
+    <p id="gc-quote"></p>
+  </div>
+  <button class="btn" id="geo-exit"><svg class="ic"><use href="#i-x"/></svg><span>Exit exhibit</span></button>
+  <div id="geo-intro" class="modal" hidden>
+    <div class="intro-card">
+      <h1 id="gi-title"></h1>
+      <p id="gi-text"></p>
+      <div class="w-actions">
+        <button class="btn primary big" id="gi-journey"><svg class="ic"><use href="#i-route"/></svg><span>Take the journey</span></button>
+        <button class="btn big" id="gi-walk"><svg class="ic"><use href="#i-walk"/></svg><span>Wander and listen</span></button>
+      </div>
+      <small>Best with headphones. Hold Space to compare the recording with how it felt.</small>
+    </div>
+  </div>
+</section>
 
 <aside id="library" class="panel left">
   <div class="panel-h">
@@ -150,6 +205,21 @@
   <button class="tbtn" id="zoom-fit" title="Fit everything (F)"><svg class="ic"><use href="#i-fit"/></svg></button>
 </div>
 <div id="minimap" title="Minimap — click or drag to navigate"><canvas></canvas></div>
+
+<div id="geo-dock" hidden>
+  <button class="tbtn" id="gd-play" title="Play or pause" aria-label="Play or pause"></button>
+  <div id="gd-title"><b id="gd-name"></b><small id="gd-sub"></small></div>
+  <div id="gd-wave-wrap">
+    <canvas id="gd-wave" title="Click to seek. The line is what steers the sound."></canvas>
+    <div id="gd-times"><span id="gd-time"></span><span id="gd-pace"></span><span id="gd-felt"></span></div>
+  </div>
+  <canvas id="gd-dial" title="White hand: clock time. Coloured hand: felt time. One turn is a minute."></canvas>
+  <div id="gd-mix" title="Crossfade between the recording and the participant's experience. Hold Space to flip.">
+    <span id="gd-mix-state">As felt</span>
+    <input id="gd-mix-in" type="range" min="0" max="1" step="0.01" value="1" aria-label="Recorded to felt">
+    <small>recorded ⟷ felt · hold Space</small>
+  </div>
+</div>
 
 <div id="dropzone" hidden><div><svg class="ic"><use href="#i-upload"/></svg><b>Drop to pin</b><span>Scans, photos, PDFs — each becomes a digital map</span></div></div>
 <div id="busy" hidden><span class="spinner"></span><span id="busy-text"></span></div>
@@ -236,7 +306,36 @@
           </ul>
           <p class="muted small">Work auto-saves in this browser. Export a project file to back up or share.</p>
         </section>
+        <section>
+          <h4>6 · Map</h4>
+          <p>Use the <b>background</b> button at the top left to swap the pinboard for streets, satellite or the Earth globe, or Google Maps and Google Earth 3D with your API key.</p>
+          <p>Drop a sound file on the map to make a <b>point</b>, or outline a <b>region</b>. Drag graphs from the library to pin them, then link anything with arrows, lines or flows. Link a graph to a sound and its lines can drive tempo, emphasis, brightness and space as it plays.</p>
+          <h4>7 · Listen</h4>
+          <p><b>Soundwalk</b> fades each place in as you move near it. <b>Journey</b> flies along your arrows, stop by stop. <b>Exhibit</b> hides the tools for visitors. Hold <kbd>Space</kbd> to flip between the recording and how it felt.</p>
+          <ul class="keys">
+            <li><kbd>A</kbd> <kbd>R</kbd> <kbd>C</kbd><span>point · region · link</span></li>
+            <li><kbd>W</kbd> <kbd>J</kbd> <kbd>X</kbd><span>soundwalk · journey · exhibit</span></li>
+          </ul>
+        </section>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- google key -->
+<div id="geo-key" class="modal" hidden>
+  <div class="dialog">
+    <div class="dialog-h"><h3>Google Maps &amp; Earth</h3><button class="tbtn" data-close title="Close"><svg class="ic"><use href="#i-x"/></svg></button></div>
+    <div class="dialog-b scroll help">
+      <p>Google's backgrounds need your own API key. It stays in this browser and is never written to project exports.</p>
+      <ol>
+        <li>In the <a href="https://console.cloud.google.com/google/maps-apis" target="_blank" rel="noopener">Google Cloud console</a>, create a project with billing enabled.</li>
+        <li>Enable the <b>Maps JavaScript API</b>, the <b>Map Tiles API</b> (for Earth 3D) and the <b>Geocoding API</b> (for search).</li>
+        <li>Create an API key and restrict it to your site's address.</li>
+      </ol>
+      <label class="field"><span class="f-l">API key</span><input id="gk-input" type="password" autocomplete="off" spellcheck="false" placeholder="AIza…"></label>
+      <div class="btn-grid"><button class="btn primary" id="gk-save"><svg class="ic"><use href="#i-check"/></svg><span>Save and use</span></button><button class="btn ghost danger" id="gk-clear"><svg class="ic"><use href="#i-trash"/></svg><span>Remove key</span></button></div>
+      <p class="muted small">A key restricted to a web address won't work on a page opened straight from a file, so serve the folder from that address. Map usage is billed by Google. The free backgrounds need no key.</p>
     </div>
   </div>
 </div>
@@ -255,6 +354,9 @@
 <script src="js/board.js"></script>
 <script src="js/panels.js"></script>
 <script src="js/digitizer.js"></script>
+<script src="js/geo.js"></script>
+<script src="js/soundscape.js"></script>
+<script src="js/atlas.js"></script>
 <script src="script.js"></script>
 </body>
 </html>

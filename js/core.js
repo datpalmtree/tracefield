@@ -231,8 +231,11 @@ function freshState() {
     template: null,
     settings: { autoDigitize: true, theme: 'dark', snap: false },
     z: 10,
+    atlas: defaultAtlas(),
+    geo: { on: false, basemap: 'satellite', cam: { lng: 12, lat: 30, zoom: 1.6, pitch: 0, bearing: 0 }, mix: 1, linkStyle: 'arrow' },
   };
 }
+function defaultAtlas() { return { places: [], pins: [], links: [], title: '', intro: '', stopSecs: 40 }; }
 let S = freshState();
 const ASSETS = new Map(); // id → { src, w, h, name }
 
@@ -269,8 +272,8 @@ const Store = {
   open() {
     return new Promise(res => {
       try {
-        const r = indexedDB.open('tracefield', 1);
-        r.onupgradeneeded = () => { r.result.createObjectStore('kv'); r.result.createObjectStore('assets'); };
+        const r = indexedDB.open('tracefield', 2);
+        r.onupgradeneeded = () => { for (const name of ['kv', 'assets', 'audio']) if (!r.result.objectStoreNames.contains(name)) r.result.createObjectStore(name); };
         r.onsuccess = () => { this.db = r.result; res(true); };
         r.onerror = () => res(false);
       } catch { res(false); }
@@ -308,7 +311,7 @@ function registerAsset(a) {
 
 const Hist = {
   past: [], future: [], last: null,
-  snap() { return JSON.stringify({ items: S.items, links: S.links, strokes: S.strokes, colorRules: S.colorRules, template: S.template }); },
+  snap() { return JSON.stringify({ items: S.items, links: S.links, strokes: S.strokes, colorRules: S.colorRules, template: S.template, atlas: S.atlas }); },
   reset() { this.past = []; this.future = []; this.last = this.snap(); this.ui(); },
   commit() {
     const s = this.snap();
