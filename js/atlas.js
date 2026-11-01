@@ -781,7 +781,8 @@ const Atlas = (() => {
     if (dockEl.hidden) return;
     $('#gd-name').textContent = p.name || 'Untitled';
     $('#gd-sub').textContent = [p.who, !p.felt && !p.drive?.tempo?.line && !p.drive?.gain?.line ? 'no felt-time drive yet' : ''].filter(Boolean).join(' · ') || (p.felt ? (p.audio ? 'recording + re-design' : 're-designed take') : 'driven by the graph');
-    $('#gd-mix').classList.toggle('off', !p.felt && !DRIVE_TARGETS.some(([k]) => p.drive?.[k]?.line));
+    const driven = (!p.felt || p.drive?.feltToo) && DRIVE_TARGETS.some(([k]) => p.drive?.[k]?.line);
+    $('#gd-mix').classList.toggle('off', !(p.audio && p.felt) && !driven);
     drawDock();
   }
 
@@ -1120,8 +1121,9 @@ const Atlas = (() => {
         })) : UI.hint('No graphs yet. Import scans on the Pinboard background, or load the sound demo.'),
       ]),
       UI.section('Felt-time drive', [
-        UI.hint('Let a drawn line steer the recording while it plays, then compare with the slider in the dock. Ignored when you upload an “as felt” file, because that file already carries the changes.'),
+        UI.hint(p.felt ? 'Your “as felt” file plays exactly as uploaded. To steer it with a drawn line as well, choose the lines below and tick the box.' : 'Let a drawn line steer the recording while it plays, then compare with the slider in the dock.'),
         UI.field('Read lines from', UI.select(d.graph || '', [['', 'No graph'], ...graphs.map(g => [g.id, gname(g)])], id => { setDriveGraph(p, id); showDock(); })),
+        d.graph && p.felt && UI.check(!!d.feltToo, 'Apply to the “as felt” file', x => { d.feltToo = x; Scape.refresh(p); showDock(); }),
         d.graph && DRIVE_TARGETS.map(([k, label, tip]) => el('div', { class: 'drive-row', title: tip },
           el('div', { class: 'drive-top' }, el('b', {}, label), UI.select(d[k].line || '', [['', 'Off'], ...lines.map(l => [l.id, l.name])], id => { d[k].line = id || null; Scape.refresh(p); showDock(); })),
           d[k].line && el('div', { class: 'drive-bot' }, UI.range(d[k].depth, 0, 2, 0.05, x => { d[k].depth = x; Scape.refresh(p); }, x => x.toFixed(2)), UI.check(d[k].inv, 'Invert', x => { d[k].inv = x; Scape.refresh(p); })))),

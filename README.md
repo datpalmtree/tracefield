@@ -12,7 +12,7 @@ There is no build step. Open `index.html` in a browser, or serve the folder:
 npx serve .
 ```
 
-Work auto-saves to the browser's IndexedDB. Use **Project → Export** for a portable `.json` backup. The map background needs an internet connection; the pinboard does not.
+Work auto-saves to the browser's IndexedDB. Use **Project → Export** for a portable `.tracefield` backup. Older `.json` exports still open. The map background needs an internet connection; the pinboard does not.
 
 To explore without your own data, choose **Sound map demo** on the welcome screen. Its sounds and quotes are synthetic.
 
@@ -35,9 +35,9 @@ Use the background button at the top left to swap the pinboard for a map.
 
 **Sound on each point**
 
-Every point has two slots: **As recorded** and **As felt**. If you have re-designed the soundscape yourself, upload it to the second slot. The dock crossfades between the two and keeps them in step, even when they differ in length.
+Every point has two slots: **As recorded** and **As felt**. If you have re-designed the soundscape yourself, upload it to the second slot. The dock crossfades between the two and keeps them in step, even when they differ in length. At either end of the slider the file you hear plays unchanged. Partway along, the quieter file is stretched to stay in step with the louder one.
 
-Without an uploaded re-design, the **felt-time drive** reshapes the recording live from a linked graph's lines:
+An uploaded re-design plays exactly as uploaded, unless you tick **Apply to the "as felt" file** in the felt-time drive. Without one, the **felt-time drive** reshapes the recording live from a linked graph's lines:
 
 | Target | High on the line | Low on the line |
 | --- | --- | --- |
@@ -60,7 +60,7 @@ Each target has a depth control and can be inverted to match how your axes are l
 Host the folder and an exported project together, then link to:
 
 ```
-index.html?project=study.json&exhibit
+index.html?project=study.tracefield&exhibit
 ```
 
 This opens the project read-only for visitors and doesn't touch anything saved in their browser.
@@ -80,11 +80,12 @@ The key is stored in that browser only and is never written to project exports. 
 
 Recordings stay in the browser unless you export them. Viewing a map requests tiles for that area from the map provider, and place search sends what you type to OpenStreetMap's Nominatim, or to Google on a Google background.
 
+Identical files are stored once, however many points use them, so a recording shared by several participants adds its size to an export only once. An export is about the size of its audio files plus the project data, and large projects don't need extra memory to export or open.
+
 An exported project contains the recordings, participant labels, quotes and exact coordinates. Check it against your consent terms before sharing it. `.gitignore` keeps audio files and exported projects out of this repository by default.
 
 ### Limits
 
-- Project files with more than about 360 MB of audio may be too large to reopen, because they load as one JSON document. The app warns before exporting one.
 - The free backgrounds use Esri's public tile services and Mapzen terrain tiles. Check Esri's terms before a commercial or high-traffic deployment.
 
 ## Layout
