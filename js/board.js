@@ -199,6 +199,7 @@ const Board = (() => {
     if (edit && set.has(edit.id)) edit = null;
     S.items = S.items.filter(i => !set.has(i.id));
     S.links = S.links.filter(l => !set.has(l.a) && !set.has(l.b));
+    Atlas.forget(set);
     for (const id of set) { nodes.get(id)?.remove(); nodes.delete(id); sel.delete(id); }
     for (const l of itemsOf('lens')) { const n = l.maps.length; l.maps = l.maps.filter(m => !set.has(m)); if (n !== l.maps.length) fill(l); }
     drawInk(); syncSel(); commit(); Welcome.update();
@@ -553,6 +554,7 @@ const Board = (() => {
         { header: maps.length > 1 ? `${maps.length} maps` : (it.meta.title || 'Map') },
         { label: 'Compare in a new lens', icon: 'lens', kbd: 'G', action: () => App.compare(ids) },
         ...lenses.map(l => ({ label: `Add to “${l.title || 'Lens'}”`, icon: 'plus', action: () => addToLens(l, maps.map(m => m.id)) })),
+        { label: 'Pin on the map', icon: 'pin', action: () => Atlas.pinFromBoard(id) },
         { label: 'Edit lines', icon: 'sculpt', action: () => setEdit({ id, mode: 'sculpt', r: 0.09 }) },
         it.asset && { label: 'Re-digitize from scan', icon: 'wand', action: () => Digitizer.open({ mapId: id }) },
         { label: 'Export CSV', icon: 'download', action: () => App.exportCSV(maps) },
@@ -569,6 +571,7 @@ const Board = (() => {
       items = [
         { header: it.title || 'Lens' },
         { label: 'Add all maps', icon: 'plus', action: () => addToLens(it, itemsOf('map').map(m => m.id)) },
+        { label: 'Pin on the map', icon: 'pin', action: () => Atlas.pinFromBoard(id) },
         { label: 'Export PNG', icon: 'download', action: () => App.exportPNG(id) },
         { label: 'Export SVG', icon: 'download', action: () => App.exportSVG(id) },
         { label: 'Export CSV (incl. averages)', icon: 'download', action: () => App.exportLensCSV(it) },
@@ -582,7 +585,8 @@ const Board = (() => {
   /* ---------- keyboard ---------- */
   function onKey(e) {
     const typing = e.target.closest?.('input,textarea,select,[contenteditable="true"]');
-    if (!$('#digitizer').hidden || !$('#help').hidden || !$('#template').hidden) return;
+    if (!$('#digitizer').hidden || !$('#help').hidden || !$('#template').hidden || !$('#geo-key').hidden) return;
+    if (Atlas.active) { if (!typing) Atlas.key(e); return; }
     if (e.key === ' ' && !typing) { if (!space) { space = true; B.classList.add('space'); } e.preventDefault(); return; }
     if (typing) return;
     const mod = e.ctrlKey || e.metaKey, k = e.key.toLowerCase();

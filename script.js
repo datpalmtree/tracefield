@@ -10,7 +10,7 @@ const PDFJS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
 const App = {
   changed: debounce(() => { Library.render(); Minimap.draw(); if (!Board.selection().length) Inspector.show(); }, 60),
 
-  afterRestore() { Board.rebuildAll(); Library.render(); },
+  afterRestore() { Board.rebuildAll(); Library.render(); Atlas.rebuild(); },
 
   setBusy(msg) {
     const b = $('#busy');
@@ -24,6 +24,7 @@ const App = {
     document.documentElement.dataset.theme = t;
     Theme.read();
     Board.rebuildAll();
+    Atlas.rebuild();
     saveSoon();
   },
 
@@ -177,22 +178,44 @@ const App = {
   stamp: () => new Date().toISOString().slice(0, 10),
   slug: s => String(s || 'export').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'export',
 
-  exportProject() {
+  async exportProject() {
     const assets = {};
     for (const it of S.items) if (it.asset && ASSETS.has(it.asset)) assets[it.asset] = ASSETS.get(it.asset);
-    download(`tracefield-${this.stamp()}.json`, JSON.stringify({ app: 'tracefield', version: 1, state: S, assets }), 'application/json');
-    toast('Project exported (images included).', 'good');
+    const used = [...AudioLib.used()].filter(id => AUDIO.has(id));
+    const bytes = used.reduce((s, id) => s + AUDIO.get(id).size, 0);
+    // the project file is opened with one JSON.parse, which browsers cap near 512 MB of text
+    if (bytes > 360e6 && !confirm(`This project holds ${Math.round(bytes / 1e6)} MB of audio, which may be too large to open again in one file. Export anyway?`)) return;
+    this.setBusy('Packing project…');
+    try {
+      const parts = [`{"app":"tracefield","version":2,"state":${JSON.stringify(S)},"assets":${JSON.stringify(assets)},"audio":{`];
+      for (let i = 0; i < used.length; i++) {
+        const { blob, ...meta } = AUDIO.get(used[i]);
+        parts.push(`${i ? ',' : ''}${JSON.stringify(used[i])}:${JSON.stringify({ ...meta, data: await AudioLib.toDataUrl(blob) })}`);
+      }
+      parts.push('}}');
+      download(`tracefield-${this.stamp()}.json`, new Blob(parts, { type: 'application/json' }));
+      toast(used.length ? `Project exported with ${used.length} recording${used.length > 1 ? 's' : ''}. Share it only as your consent terms allow.` : 'Project exported (images included).', 'good', 5000);
+    } catch (err) { console.error(err); toast('Export failed: ' + err.message, 'bad', 6000); }
+    this.setBusy(null);
   },
-  async importProject(file) {
+  async importProject(file, quiet) {
     try {
       const data = JSON.parse(await file.text());
       if (data.app !== 'tracefield') throw new Error('not a Tracefield project file');
-      if (S.items.length && !confirm('Replace the current board with this project? (Export first if you want to keep it.)')) return;
+      if (!quiet && S.items.length && !confirm('Replace the current board with this project? (Export first if you want to keep it.)')) return;
+      Scape.dropAll();
       ASSETS.clear(); await Store.clear('assets');
+      AUDIO.clear(); await Store.clear('audio');
       for (const [id, a] of Object.entries(data.assets || {})) { ASSETS.set(id, a); Store.put('assets', id, a); }
-      S = { ...freshState(), ...data.state, settings: { ...freshState().settings, ...(data.state.settings || {}) } };
+      for (const [id, { data: url, ...meta }] of Object.entries(data.audio || {})) {
+        const a = { ...meta, blob: AudioLib.fromDataUrl(url) };
+        AUDIO.set(id, a); Store.put('audio', id, a);
+      }
+      const f = freshState();
+      S = { ...f, ...data.state, settings: { ...f.settings, ...(data.state.settings || {}) }, atlas: { ...f.atlas, ...(data.state.atlas || {}) }, geo: { ...f.geo, ...(data.state.geo || {}) } };
       document.documentElement.dataset.theme = S.settings.theme; Theme.read();
       Board.rebuildAll(); Library.render(); Hist.reset(); saveNow();
+      Atlas.rebuild();
       Board.fit();
       toast('Project loaded.', 'good');
     } catch (err) { toast('Could not open project: ' + err.message, 'bad', 5000); }
@@ -289,10 +312,13 @@ const App = {
   async clearBoard() {
     if (!confirm('Clear the whole board? This cannot be undone (export first to keep a copy).')) return;
     Player.stop();
-    const settings = S.settings;
-    S = freshState(); S.settings = settings;
+    Scape.dropAll();
+    const settings = S.settings, geo = S.geo;
+    S = freshState(); S.settings = settings; S.geo = geo;
     ASSETS.clear(); await Store.clear('assets');
+    AUDIO.clear(); await Store.clear('audio');
     Board.rebuildAll(); Library.render(); Hist.reset(); saveNow();
+    Atlas.rebuild();
   },
 
   mainMenu(btn) {
@@ -302,6 +328,7 @@ const App = {
       { label: 'Export project (.json)', icon: 'download', kbd: 'Ctrl S', action: () => this.exportProject() },
       { label: 'Open project…', icon: 'upload', action: () => $('#project-input').click() },
       { label: 'Load demo data', icon: 'sparkle', action: () => this.loadDemo() },
+      { label: 'Load sound map demo', icon: 'earth', action: () => Atlas.loadDemo() },
       '-',
       { label: 'Template & auto-digitize…', icon: 'template', action: () => Template.open() },
       { label: S.settings.theme === 'dark' ? 'Paper theme' : 'Night theme', icon: S.settings.theme === 'dark' ? 'sun' : 'moon', action: () => this.setTheme(S.settings.theme === 'dark' ? 'light' : 'dark') },
@@ -323,14 +350,16 @@ function wireUI() {
   $('#btn-redo').onclick = () => Hist.redo();
   $('#btn-menu').onclick = e => App.mainMenu(e.currentTarget);
   $('#btn-help').onclick = () => Help.open();
-  $('#zoom-in').onclick = () => Board.zoomBy(1.25);
-  $('#zoom-out').onclick = () => Board.zoomBy(0.8);
-  $('#zoom-fit').onclick = () => Board.fit();
-  $('#zoom-label').onclick = () => Board.zoomTo100();
+  $('#zoom-in').onclick = () => Atlas.active ? Atlas.zoomBy(1.6) : Board.zoomBy(1.25);
+  $('#zoom-out').onclick = () => Atlas.active ? Atlas.zoomBy(0.6) : Board.zoomBy(0.8);
+  $('#zoom-fit').onclick = () => Atlas.active ? Atlas.fitAll() : Board.fit();
+  $('#zoom-label').onclick = () => { if (!Atlas.active) Board.zoomTo100(); };
   $('#file-input').addEventListener('change', e => { App.importFiles(e.target.files, App._at); e.target.value = ''; });
   $('#project-input').addEventListener('change', e => { if (e.target.files[0]) App.importProject(e.target.files[0]); e.target.value = ''; });
   $('#welcome-import').onclick = () => App.pickFiles();
   $('#welcome-demo').onclick = () => App.loadDemo();
+  $('#welcome-map').onclick = () => Atlas.loadDemo();
+  $('#hint-demo').onclick = () => Atlas.loadDemo();
   $('#welcome-help').onclick = () => Help.open();
   $$('[data-close]').forEach(b => b.addEventListener('click', () => { const m = b.closest('.modal'); if (m.id === 'template') Template.close(); else m.hidden = true; }));
   $('#lib-toggle').onclick = () => $('#library').classList.toggle('collapsed');
@@ -353,13 +382,14 @@ function wireUI() {
     if (!isFiles(e)) return;
     e.preventDefault(); depth = 0; dz.hidden = true;
     if (!$('#digitizer').hidden) return;
+    if (Atlas.active) return Atlas.dropFiles(e.dataTransfer.files, e.clientX, e.clientY);
     App.importFiles(e.dataTransfer.files, Board.toWorld(e.clientX, e.clientY));
   });
   // paste images
   window.addEventListener('paste', e => {
     if (e.target.closest?.('input,textarea,[contenteditable="true"]')) return;
     const files = [...(e.clipboardData?.files || [])];
-    if (files.length) { e.preventDefault(); App.importFiles(files); }
+    if (files.length && !Atlas.active) { e.preventDefault(); App.importFiles(files); }
   });
   window.addEventListener('beforeunload', () => saveNow());
 }
@@ -371,8 +401,9 @@ function wireUI() {
       const raw = await Store.get('kv', 'project');
       if (raw) {
         const data = JSON.parse(raw), f = freshState();
-        S = { ...f, ...data, settings: { ...f.settings, ...(data.settings || {}) } };
+        S = { ...f, ...data, settings: { ...f.settings, ...(data.settings || {}) }, atlas: { ...f.atlas, ...(data.atlas || {}) }, geo: { ...f.geo, ...(data.geo || {}) } };
       }
+      await AudioLib.load();
       const used = new Set(S.items.map(i => i.asset).filter(Boolean));
       for (const k of (await Store.keys('assets')) || []) {
         if (!used.has(k)) { Store.del('assets', k); continue; }
@@ -384,12 +415,27 @@ function wireUI() {
 
   document.documentElement.dataset.theme = S.settings.theme || 'dark';
   Theme.read();
-  Board.init(); Inspector.init(); Library.init(); Digitizer.init();
+  Board.init(); Inspector.init(); Library.init(); Digitizer.init(); Atlas.init();
   wireUI();
   Board.setTool('select');
   if (!S.items.length) { const r = $('#board').getBoundingClientRect(); S.view = { x: r.width / 2, y: r.height / 2, z: 1 }; }
   Board.rebuildAll();
   Library.render();
   Hist.reset();
+  Atlas.setMix(S.geo.mix ?? 1);
   document.body.classList.add('ready');
+
+  // ?project=study.json loads a hosted project without touching this browser's saved work; ?exhibit opens it for visitors
+  const q = new URLSearchParams(location.search);
+  if (q.has('project')) {
+    Store.db = null;
+    try {
+      const r = await fetch(q.get('project'));
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      App.locked = q.has('exhibit');
+      await App.importProject(await r.blob(), true);
+    } catch (err) { toast('Could not load that project: ' + err.message, 'bad', 7000); }
+  }
+  if (q.has('exhibit')) { await Atlas.enter(); Atlas.exhibit(true); }
+  else if (S.geo.on) Atlas.enter();
 })();

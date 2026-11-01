@@ -92,7 +92,8 @@ const Inspector = (() => {
     const st = root.scrollTop, ids = Board.selection();
     root.innerHTML = '';
     let kids;
-    if (!ids.length) kids = overview();
+    if (Atlas.active) kids = Atlas.form();
+    else if (!ids.length) kids = overview();
     else if (ids.length > 1) kids = multi(ids.map(getItem).filter(Boolean));
     else { const it = getItem(ids[0]); kids = it ? (forms[it.type]?.(it) || []) : []; }
     root.append(datalists(), ...kids.filter(Boolean));
@@ -502,15 +503,25 @@ const Library = (() => {
       if (g) root.append(el('div', { class: 'lib-g' }, g, el('small', {}, list.length)));
       list.sort((a, b) => String(a.meta.session).localeCompare(String(b.meta.session), undefined, { numeric: true }));
       for (const m of list) {
-        const row = el('div', { class: 'lib-row' + (Board.selection().includes(m.id) ? ' on' : ''), draggable: 'true', title: 'Click to find · drag onto a lens' },
+        const row = el('div', { class: 'lib-row' + (Board.selection().includes(m.id) ? ' on' : ''), draggable: 'true', title: Atlas.active ? 'Click to pin at the map centre · drag onto the map or a point' : 'Click to find · drag onto a lens' },
           el('span', { class: 'swatch', style: { background: m.color } }),
           el('div', { class: 'lib-t' }, el('b', {}, m.meta.title || 'Untitled'), el('small', {}, [m.meta.participant, m.meta.session && 'Test ' + m.meta.session, m.meta.condition].filter(Boolean).join(' · ') || '—')),
           el('span', { class: 'lib-lines' }, m.lines.map(l => el('i', { style: { background: l.color }, title: l.name }))));
-        row.addEventListener('click', () => { Board.select([m.id]); Board.fit([m.id]); });
+        row.addEventListener('click', () => { if (Atlas.active) return Atlas.focusItem(m.id); Board.select([m.id]); Board.fit([m.id]); });
         row.addEventListener('dblclick', () => m.asset && Digitizer.open({ mapId: m.id }));
         row.addEventListener('dragstart', e => { e.dataTransfer.setData('application/x-tf-map', m.id); e.dataTransfer.effectAllowed = 'copy'; });
         row.addEventListener('mouseenter', () => Board.node(m.id)?.classList.add('hl'));
         row.addEventListener('mouseleave', () => Board.node(m.id)?.classList.remove('hl'));
+        root.append(row);
+      }
+    }
+    if (Atlas.active && itemsOf('lens').length) {
+      root.append(el('div', { class: 'lib-g' }, 'Lenses', el('small', {}, itemsOf('lens').length)));
+      for (const l of itemsOf('lens')) {
+        const row = el('div', { class: 'lib-row', draggable: 'true', title: 'Click to pin at the map centre · drag onto the map or a point' },
+          el('span', { class: 'lens-ic', html: ic('lens') }), el('div', { class: 'lib-t' }, el('b', {}, l.title || 'Lens'), el('small', {}, `${l.maps.length} maps`)));
+        row.addEventListener('click', () => Atlas.focusItem(l.id));
+        row.addEventListener('dragstart', e => { e.dataTransfer.setData('application/x-tf-map', l.id); e.dataTransfer.effectAllowed = 'copy'; });
         root.append(row);
       }
     }
