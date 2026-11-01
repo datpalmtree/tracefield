@@ -97,7 +97,7 @@ const DRIVE_TARGETS = [
   ['space', 'Space', 'High on the line = more reverb, for a dreamlike or distant quality.', 0.8],
 ];
 function defaultDrive() {
-  const d = { graph: null, keepPitch: true };
+  const d = { graph: null, keepPitch: true, feltToo: false };
   for (const [k, , , depth] of DRIVE_TARGETS) d[k] = { line: null, depth, inv: false };
   return d;
 }
@@ -165,7 +165,31 @@ const Scape = (() => {
     const p = v.place;
     v.curves = { tempo: curve(p, 'tempo'), gain: curve(p, 'gain'), bright: curve(p, 'bright'), space: curve(p, 'space') };
     v.table = feltTable(p, v.curves.tempo);
-    for (const c of [v.a, v.b]) if (c) c.el.preservesPitch = p.drive?.keepPitch !== false;
+    v.driven = !p.felt || !!p.drive?.feltToo;
+    for (const c of [v.a, v.b]) if (c) c.el.preservesPitch = !v.driven || p.drive?.keepPitch !== false;
+  }
+
+  const leadOf = v => v.b && mix >= 0.5 ? v.b : v.a;
+
+  function finish(v) {
+    if (!v.playing) return;
+    v.playing = false;
+    v.level.gain.setTargetAtTime(0, ctx.currentTime, 0.02);
+    v.a.el.pause(); v.b?.el.pause();
+    onEnded(v.place.id);
+  }
+
+  /** The other clip matches the lead by speed, not seeking, so the lead is never interrupted. */
+  function follow(v, lead, rate) {
+    const f = lead === v.a ? v.b : v.a, ld = lead.el.duration, fd = f.el.duration;
+    if (!(ld > 0 && fd > 0 && isFinite(ld) && isFinite(fd))) return;
+    if (f.el.paused && !f.el.ended) f.el.play().catch(() => {});
+    let drift = f.el.currentTime / fd - v.u;
+    if (f.el.loop) drift -= Math.round(drift);
+    let off = drift * fd;
+    if (Math.abs(off) > 1.5) { f.el.currentTime = v.u * fd; off = 0; }
+    const nudge = Math.abs(off) > 0.05 ? clamp(1 - off * 0.5, 0.9, 1.1) : 1;
+    f.el.playbackRate = clamp(rate * fd / ld * nudge, 0.25, 4);
   }
 
   function voice(place) {
@@ -180,7 +204,7 @@ const Scape = (() => {
     for (const c of [rec, felt]) if (c) c.gain.connect(filter);
     filter.connect(emph); emph.connect(pan); pan.connect(level); level.connect(an); an.connect(bus); level.connect(send); send.connect(reverb);
     v = { key: `${place.audio}|${place.felt}`, place, a: rec || felt, b: rec && felt ? felt : null, rec: !!rec, filter, emph, pan, level, send, an, buf: new Float32Array(an.fftSize), target: 0, playing: false, lv: 0, rate: 1, u: 0 };
-    v.a.el.addEventListener('ended', () => { v.playing = false; v.level.gain.setTargetAtTime(0, ctx.currentTime, 0.02); if (v.b) v.b.el.pause(); onEnded(place.id); });
+    for (const c of [v.a, v.b]) if (c) c.el.addEventListener('ended', () => { if (c === leadOf(v)) finish(v); });
     prepare(v);
     voices.set(place.id, v);
     return v;
@@ -195,7 +219,7 @@ const Scape = (() => {
     v.a.el.loop = !!o.loop;
     if (v.b) v.b.el.loop = !!o.loop;
     if (o.from != null) seek(place.id, o.from);
-    else if (v.a.el.ended) v.a.el.currentTime = 0;
+    else if (leadOf(v).el.ended) seek(place.id, 0);
     v.playing = true;
     clearTimeout(v.fade);
     v.level.gain.setTargetAtTime(v.target, ctx.currentTime, 0.08);
@@ -233,31 +257,27 @@ const Scape = (() => {
   }
 
   function tickVoice(v) {
-    const t = ctx.currentTime, dur = v.a.el.duration;
-    if (isFinite(dur) && dur > 0) v.u = clamp(v.a.el.currentTime / dur, 0, 1);
-    const u = v.u, c = v.curves, hasFile = !!v.b;
+    const t = ctx.currentTime, lead = leadOf(v), dur = lead.el.duration;
+    if (lead.el.ended) { finish(v); return; }
+    if (isFinite(dur) && dur > 0) v.u = clamp(lead.el.currentTime / dur, 0, 1);
+    const u = v.u, c = v.curves;
     const x = read(c.tempo, u), d = v.place.drive || {};
     v.rate = rateOf(v.place, x);
-    if (hasFile) {
-      // an uploaded re-design already carries the warp: follow position, crossfade, no live processing
-      const db = v.b.el.duration;
-      if (isFinite(db) && db > 0 && Math.abs(v.b.el.currentTime / db - u) * db > 0.35) v.b.el.currentTime = u * db;
+    const amt = v.driven ? mix : 0, rate = lerp(1, v.rate, amt);
+    lead.el.playbackRate = rate;
+    if (v.b) {
+      follow(v, lead, rate);
       v.a.gain.gain.setTargetAtTime(Math.cos(mix * Math.PI / 2), t, 0.04);
       v.b.gain.gain.setTargetAtTime(Math.sin(mix * Math.PI / 2), t, 0.04);
-      v.a.el.playbackRate = 1;
-      v.filter.frequency.setTargetAtTime(20000, t, 0.1);
-      v.emph.gain.setTargetAtTime(1, t, 0.1);
-      v.send.gain.setTargetAtTime(0, t, 0.1);
     } else {
       v.a.gain.gain.setTargetAtTime(1, t, 0.04);
-      v.a.el.playbackRate = lerp(1, v.rate, mix);
-      const gdb = read(c.gain, u) * (d.gain?.depth ?? 0) * 12 * mix;
-      v.emph.gain.setTargetAtTime(10 ** (gdb / 20), t, 0.09);
-      const b = c.bright ? read(c.bright, u) : 1;
-      const octaves = (1 - b) * 3 * (d.bright?.depth ?? 1) * (c.bright ? mix : 0);
-      v.filter.frequency.setTargetAtTime(20000 / 2 ** octaves, t, 0.1);
-      v.send.gain.setTargetAtTime(c.space ? (read(c.space, u) + 1) / 2 * (d.space?.depth ?? 0) * mix : 0, t, 0.12);
     }
+    const gdb = read(c.gain, u) * (d.gain?.depth ?? 0) * 12 * amt;
+    v.emph.gain.setTargetAtTime(10 ** (gdb / 20), t, 0.09);
+    const b = c.bright ? read(c.bright, u) : 1;
+    const octaves = (1 - b) * 3 * (d.bright?.depth ?? 1) * (c.bright ? amt : 0);
+    v.filter.frequency.setTargetAtTime(20000 / 2 ** octaves, t, 0.1);
+    v.send.gain.setTargetAtTime(c.space ? (read(c.space, u) + 1) / 2 * (d.space?.depth ?? 0) * amt : 0, t, 0.12);
     v.an.getFloatTimeDomainData(v.buf);
     let e = 0;
     for (let i = 0; i < v.buf.length; i++) e += v.buf[i] * v.buf[i];
@@ -276,9 +296,9 @@ const Scape = (() => {
     const v = voices.get(id);
     if (!v) return null;
     const dur = isFinite(v.a.el.duration) ? v.a.el.duration : 0, u = v.u;
-    let felt = u * dur, feltDur = dur;
-    if (v.b) { const db = isFinite(v.b.el.duration) ? v.b.el.duration : dur; felt = u * db; feltDur = db; }
-    else if (v.table) { const i = Math.round(u * N); felt = v.table[i] * dur; feltDur = v.table[N] * dur; }
+    const base = v.b && isFinite(v.b.el.duration) ? v.b.el.duration : dur;
+    let felt = u * base, feltDur = base;
+    if (v.driven && v.table) { felt = v.table[Math.round(u * N)] * base; feltDur = v.table[N] * base; }
     return { playing: v.playing, u, dur, clock: u * dur, felt, feltDur, rate: v.rate, level: v.lv, x: read(v.curves.tempo, u) };
   }
 

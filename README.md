@@ -35,9 +35,9 @@ Use the background button at the top left to swap the pinboard for a map.
 
 **Sound on each point**
 
-Every point has two slots: **As recorded** and **As felt**. If you have re-designed the soundscape yourself, upload it to the second slot. The dock crossfades between the two and keeps them in step, even when they differ in length.
+Every point has two slots: **As recorded** and **As felt**. If you have re-designed the soundscape yourself, upload it to the second slot. The dock crossfades between the two and keeps them in step, even when they differ in length. At either end of the slider the file you hear plays unchanged. Partway along, the quieter file is stretched to stay in step with the louder one.
 
-Without an uploaded re-design, the **felt-time drive** reshapes the recording live from a linked graph's lines:
+An uploaded re-design plays exactly as uploaded, unless you tick **Apply to the "as felt" file** in the felt-time drive. Without one, the **felt-time drive** reshapes the recording live from a linked graph's lines:
 
 | Target | High on the line | Low on the line |
 | --- | --- | --- |
