@@ -114,10 +114,16 @@ const AudioLib = {
 
 const fmtTime = s => { if (!isFinite(s) || s < 0) s = 0; return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`; };
 
-/** Lines a place can be driven by: a map's visible lines, or a lens's group averages. */
+/** Lines a place can be driven by: a map's visible lines, or a lens's group averages followed by each of its lines. */
 function graphLines(item) {
   if (item?.type === 'map') return item.lines.filter(l => l.visible).map(l => ({ id: l.id, name: l.name, color: l.color, pts: Plot.effective(l) }));
-  if (item?.type === 'lens') return [...Plot.lensData(item).agg].map(([g, a]) => ({ id: 'avg:' + g, name: '⌀ ' + g, color: a.color, pts: a.mean }));
+  if (item?.type === 'lens') {
+    const D = Plot.lensData(item);
+    return [
+      ...[...D.agg].map(([g, a]) => ({ id: 'avg:' + g, name: '⌀ ' + g, color: a.color, pts: a.mean })),
+      ...D.series.filter(s => s.on).map(s => ({ id: s.key, name: Plot.seriesLabel(s), color: s.color, pts: s.pts, single: true })),
+    ];
+  }
   return [];
 }
 

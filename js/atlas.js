@@ -525,7 +525,7 @@ const Atlas = (() => {
   function setDriveGraph(p, itemId) {
     p.drive = fillDrive(p.drive || defaultDrive());
     p.drive.graph = itemId || null;
-    const lines = graphLines(getItem(itemId));
+    const lines = graphLines(getItem(itemId)).filter(l => !l.single);
     const pick = (re, not) => (lines.find(l => re.test(l.name) && l.id !== not) || null)?.id || null;
     p.drive.tempo.line = pick(/pace|tempo|time|speed|felt|passage/i) || lines[0]?.id || null;
     p.drive.gain.line = pick(/emph|loud|salien|intens|sound|attention/i, p.drive.tempo.line) || null;
@@ -1096,6 +1096,13 @@ const Atlas = (() => {
     const linked = linkedItems(p).map(getItem).filter(Boolean);
     const gname = it => it.type === 'lens' ? `Lens · ${it.title}` : it.meta.title || 'Untitled map';
     const lines = graphLines(getItem(d.graph));
+    const picks = {};
+    const lineOptions = list => [['', 'Off'], ...list.map(l => [l.id, l.name])].map(([v, name]) => el('option', { value: v }, name));
+    // updated in place: re-rendering the panel here would close a dropdown the user just clicked
+    const syncPicks = () => {
+      const fresh = graphLines(getItem(d.graph));
+      for (const [k, sel] of Object.entries(picks)) { sel.replaceChildren(...lineOptions(fresh)); sel.value = d[k].line || ''; }
+    };
     return [
       head(p.color, p.kind === 'region' ? 'Region' : 'Sound point', p.name || 'Untitled', [`${anchor(p)[1].toFixed(4)}, ${anchor(p)[0].toFixed(4)}`].join('')),
       hasSound(p) && el('div', { class: 'btn-grid' }, UI.btn(Scape.isPlaying(p.id) ? 'Pause' : 'Play', Scape.isPlaying(p.id) ? 'pause' : 'play', () => { toggle(p); Inspector.show(); }, 'primary'), UI.btn('Fly here', 'fit', () => flyToPlace(p))),
@@ -1126,12 +1133,13 @@ const Atlas = (() => {
         UI.field('Read lines from', UI.select(d.graph || '', [['', 'No graph'], ...graphs.map(g => [g.id, gname(g)])], id => { setDriveGraph(p, id); showDock(); })),
         d.graph && p.felt && UI.check(!!d.feltToo, 'Apply to the “as felt” file', x => { d.feltToo = x; Scape.refresh(p); showDock(); }),
         d.graph && DRIVE_TARGETS.map(([k, label, tip]) => el('div', { class: 'drive-row', title: tip },
-          el('div', { class: 'drive-top' }, el('b', {}, label), UI.select(d[k].line || '', [['', 'Off'], ...lines.map(l => [l.id, l.name])], id => { d[k].line = id || null; Scape.refresh(p); showDock(); })),
+          el('div', { class: 'drive-top' }, el('b', {}, label), picks[k] = UI.select(d[k].line || '', [['', 'Off'], ...lines.map(l => [l.id, l.name])], id => { d[k].line = id || null; Scape.refresh(p); showDock(); })),
           d[k].line && k === 'delay' && UI.field('Intensity', UI.range(d[k].depth, 0, 2, 0.05, x => { d[k].depth = x; Scape.refresh(p); }, x => x.toFixed(2))),
           d[k].line && k === 'delay' && UI.field('Time', UI.range(d[k].ms, 20, 2000, 10, x => { d[k].ms = x; }, x => `${x} ms`)),
           d[k].line && el('div', { class: 'drive-bot' }, k !== 'delay' && UI.range(d[k].depth, 0, 2, 0.05, x => { d[k].depth = x; Scape.refresh(p); }, x => x.toFixed(2)), UI.check(d[k].inv, 'Invert', x => { d[k].inv = x; Scape.refresh(p); })))),
         d.graph && d.tempo.line && UI.check(d.keepPitch !== false, 'Keep pitch when the tempo changes', x => { d.keepPitch = x; Scape.refresh(p); }),
       ]),
+      getItem(d.graph) && lineNames(getItem(d.graph), syncPicks),
       el('div', { class: 'btn-grid' }, UI.btn('Link to…', 'link', () => setTool('link')), UI.btn('Delete', 'trash', () => removeSel(), 'danger')),
     ];
   }
@@ -1149,6 +1157,7 @@ const Atlas = (() => {
         if (l) autoDrive(l);
         dirty = true; Inspector.show();
       })),
+      lineNames(it),
       UI.hint('Drag the title bar to move the card; drag the small dot on the map to re-pin it.'),
       el('div', { class: 'btn-grid' },
         UI.btn('Open on pinboard', 'grid', () => { leave(); Board.select([it.id]); Board.fit([it.id]); }),

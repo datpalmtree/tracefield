@@ -8,7 +8,7 @@
 const PDFJS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
 
 const App = {
-  changed: debounce(() => { Library.render(); Minimap.draw(); if (!Board.selection().length) Inspector.show(); }, 60),
+  changed: debounce(() => { Library.render(); Minimap.draw(); if (Atlas.active || !Board.selection().length) Inspector.show(); }, 60),
 
   afterRestore() { Board.rebuildAll(); Library.render(); Atlas.rebuild(); },
 

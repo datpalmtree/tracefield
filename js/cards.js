@@ -99,7 +99,8 @@ const Editor = {
       let ln = ed.mode === 'new' ? null : target();
       const base = ln ? ln.pts.slice() : null;
       if (!ln) {
-        const n = it.lines.length + 1;
+        let n = it.lines.length + 1;
+        while (it.lines.some(l => l.name === `Line ${n}`)) n++;
         ln = { id: uid('l'), name: `Line ${n}`, key: `Line ${n}`, color: PALETTE[(n - 1) % PALETTE.length], visible: true, pts: [], adj: { dy: 0, sy: 1, smooth: 0 }, manual: true };
         it.lines.push(ln);
       }
@@ -113,7 +114,7 @@ const Editor = {
         Board.refreshSoon(it.id);
       }, () => {
         if (ln.pts.length < 2) it.lines = it.lines.filter(l => l !== ln);
-        else if (ed.mode === 'new') { ed.mode = 'redraw'; ed.line = ln.id; }
+        else if (ed.mode === 'new') { ed.mode = 'redraw'; ed.line = ln.id; ed.naming = true; }
         finish();
       });
     } else if (ed.mode === 'erase') {
@@ -127,10 +128,17 @@ const Editor = {
   bar(it) {
     const ed = Board.edit;
     const modes = [['sculpt', 'Sculpt', 'Push a line up/down with a soft brush'], ['redraw', 'Redraw', 'Draw over a stretch of line to replace it'], ['new', '+ Line', 'Draw a brand-new line'], ['erase', 'Cut', 'Erase a stretch of a line']];
+    const cur = it.lines.find(l => l.id === ed.line);
+    const name = cur && lineNameInput(cur, () => Inspector.show());
+    if (name && ed.naming) {
+      ed.naming = false;
+      requestAnimationFrame(() => { name.focus(); name.select(); });
+    }
     return el('div', { class: 'edit-bar no-drag' },
       el('div', { class: 'seg mini' }, modes.map(([k, l, t]) => el('button', { class: ed.mode === k ? 'on' : '', title: t, onclick: e => { e.stopPropagation(); Board.setEdit({ ...ed, mode: k }); } }, l))),
-      el('select', { class: 'mini-select', title: 'Line to edit', value: ed.line || '', onchange: e => { ed.line = e.target.value || null; } },
+      el('select', { class: 'mini-select', title: 'Line to edit', value: ed.line || '', onchange: e => { ed.line = e.target.value || null; Board.refresh(it.id, false); } },
         el('option', { value: '' }, 'Nearest line'), it.lines.map(l => el('option', { value: l.id }, l.name))),
+      name,
       el('label', { class: 'mini-range', title: 'Brush width' }, 'Brush',
         el('input', { type: 'range', min: 0.02, max: 0.35, step: 0.01, value: ed.r, oninput: e => { ed.r = +e.target.value; } })),
       el('button', { class: 'done', onclick: e => { e.stopPropagation(); Board.setEdit(null); } }, 'Done'));

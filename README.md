@@ -47,6 +47,8 @@ An uploaded re-design plays exactly as uploaded, unless you tick **Apply to the 
 | Space | more reverb | drier |
 | Delay | stronger repeats | fewer, quieter repeats |
 
+**Line names:** a name box appears as soon as you finish drawing a line. To rename later, use **Line names** in a lens's panel, a pinned graph's panel or a sound point's panel. A line belongs to its map, so a lens renames it there too. Lines with the same name are averaged together in a lens, so different names keep them apart. A lens also offers each individual line to the felt-time drive as well as the averages, so different lines can steer different targets.
+
 Each target has a depth control and can be inverted to match how your axes are labelled. Delay's depth control is labelled **Intensity**, and it also has a **Time** slider that sets the gap between repeats, from 20 to 2000 ms.
 
 **Listening**

@@ -66,6 +66,51 @@ const UI = {
   },
 };
 
+/** The compare key follows the name unless it was set separately, and sound points keep following a renamed average. */
+function renameLine(ln, name) {
+  const old = ln.key;
+  if (ln.key === ln.name) ln.key = name;
+  ln.name = name;
+  if (ln.key === old) return;
+  for (const p of S.atlas.places) for (const [k] of DRIVE_TARGETS) {
+    const t = p.drive?.[k];
+    if (t?.line === 'avg:' + old && !graphLines(getItem(p.drive.graph)).some(l => l.id === t.line)) t.line = 'avg:' + ln.key;
+  }
+}
+
+function lineNameInput(ln, done) {
+  let before = ln.name;
+  return el('input', {
+    type: 'text', class: 'ln-name', value: ln.name, placeholder: 'Name this line', 'aria-label': 'Line name',
+    oninput: e => renameLine(ln, e.target.value),
+    onkeydown: e => { if (e.key === 'Enter') e.target.blur(); },
+    onchange: e => {
+      if (!e.target.value.trim()) { renameLine(ln, before); e.target.value = before; }
+      before = ln.name;
+      for (const m of S.items) if (m.type === 'map' || m.type === 'lens') Board.refresh(m.id, false);
+      if (Atlas.active) Atlas.rebuild();
+      // not commit(): its panel refresh would steal focus from the next box or close a dropdown just clicked
+      Hist.commit(); saveSoon(); Library.render();
+      done?.();
+    },
+  });
+}
+
+/** Every line of a map, or of each map in a lens. A line belongs to its map, so a lens renames it there. */
+function lineNames(it, done) {
+  const maps = it.type === 'lens' ? Plot.lensMaps(it) : [it];
+  const rows = maps.flatMap(m => [
+    it.type === 'lens' && el('small', { class: 'muted small' }, m.meta.participant || m.meta.title || 'Untitled map'),
+    ...m.lines.map(ln => el('div', { class: 'ln-row' }, el('span', { class: 'swatch', style: { background: ln.color } }), lineNameInput(ln, done))),
+  ]);
+  const count = maps.reduce((s, m) => s + m.lines.length, 0);
+  return UI.section('Line names', [
+    ...rows,
+    !count && UI.hint('No lines yet.'),
+    count > 0 && UI.hint(it.type === 'lens' ? 'This also renames the line on its own map. Lines with the same name are averaged together, so different names keep them apart.' : 'Lines with the same name across maps are averaged together in a lens, so different names keep them apart.'),
+  ], count <= 8);
+}
+
 const COLOR_BY = [['line', 'Line (key)'], ['participant', 'Participant'], ['session', 'Test / session'], ['condition', 'Condition'], ['map', 'Map'], ['tag', 'First tag'], ['ink', 'Line’s own colour'], ['single', 'Single colour']];
 const GROUP_BY = [['line', 'Line (key)'], ['all', 'Everything'], ['participant', 'Participant'], ['session', 'Test / session'], ['condition', 'Condition'], ['tag', 'First tag'], ['map', 'Map']];
 const CURVES = [['smooth', 'Smooth'], ['linear', 'Linear'], ['step', 'Step'], ['points', 'Dots'], ['ink', 'Ink']];
@@ -127,7 +172,6 @@ const Inspector = (() => {
       const adj = ln.adj || (ln.adj = { dy: 0, sy: 1, smooth: 0 });
       const sp = UI.spark(Plot.effective(ln), ln.color);
       const updSpark = () => { const n = UI.spark(Plot.effective(ln), ln.color); sp.replaceWith(n); };
-      let lastName = ln.name;
       const more = el('div', { class: 'ln-more', hidden: !UI.open.has(ln.id) },
         UI.field('Compare key — lines with the same key are averaged together', UI.text(ln.key, x => { ln.key = x; up(); }, { placeholder: 'e.g. Line 1 / Sound', list: 'dl-keys' })),
         UI.field('Shift', UI.range(adj.dy, -0.5, 0.5, 0.01, x => { adj.dy = x; up(); }, x => (x > 0 ? '+' : '') + Math.round(x * 100) + '%')),
@@ -140,7 +184,7 @@ const Inspector = (() => {
       return el('div', { class: 'ln' + (ln.visible ? '' : ' off') },
         el('div', { class: 'ln-row' },
           UI.color(ln.color, c => { ln.color = c; up(); updSpark(); }),
-          el('input', { type: 'text', class: 'ln-name', value: ln.name, oninput: e => { if (ln.key === lastName) ln.key = e.target.value; ln.name = lastName = e.target.value; up(); }, onchange: () => commit() }),
+          el('input', { type: 'text', class: 'ln-name', value: ln.name, oninput: e => { renameLine(ln, e.target.value); up(); }, onchange: () => commit() }),
           sp,
           iconBtn(ln.visible ? 'eye' : 'eye-off', 'Show / hide', ln.visible, () => { ln.visible = !ln.visible; Board.refresh(it.id); commit(); show(); }),
           iconBtn('sliders', 'Key, shift, scale, smooth…', UI.open.has(ln.id), e => { UI.open.has(ln.id) ? UI.open.delete(ln.id) : UI.open.add(ln.id); more.hidden = !more.hidden; e.currentTarget.classList.toggle('on'); })),
@@ -329,6 +373,7 @@ const Inspector = (() => {
         UI.row(UI.check(o.grid, 'Grid', x => { o.grid = x; up(); }), UI.check(o.ticks, 'Values', x => { o.ticks = x; up(); })),
         UI.field('Playhead sweep', UI.range(o.dur, 2, 40, 1, x => { o.dur = x; }, x => x + ' s')),
       ]),
+      lineNames(it),
       UI.section('Merge & compare', [
         UI.row(UI.check(o.avg, 'Average line', x => { o.avg = x; up(); }), UI.check(o.showLines, 'Individual lines', x => { o.showLines = x; up(); })),
         UI.field('Average per', UI.select(o.groupBy, GROUP_BY, x => { o.groupBy = x; upx(); })),
