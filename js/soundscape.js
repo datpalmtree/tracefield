@@ -126,11 +126,17 @@ const DRIVE_TARGETS = [
   ['gain', 'Emphasis', 'High on the line = louder, low = quieter. Depth 1 = ±12 dB.', 0.75],
   ['bright', 'Brightness', 'High on the line = open and clear, low = muffled, as if heard from far away.', 1],
   ['space', 'Space', 'High on the line = more reverb, for a dreamlike or distant quality.', 0.8],
+  ['delay', 'Delay', 'High on the line = stronger repeats, as if moments linger. Low = dry.', 1],
 ];
-function defaultDrive() {
-  const d = { graph: null, keepPitch: true, feltToo: false };
-  for (const [k, , , depth] of DRIVE_TARGETS) d[k] = { line: null, depth, inv: false };
+const DELAY_MS = 350;
+/** Also upgrades drives saved before a target existed. */
+function fillDrive(d) {
+  for (const [k, , , depth] of DRIVE_TARGETS) d[k] = d[k] || { line: null, depth, inv: false };
+  d.delay.ms = d.delay.ms ?? DELAY_MS;
   return d;
+}
+function defaultDrive() {
+  return fillDrive({ graph: null, keepPitch: true, feltToo: false });
 }
 
 const Scape = (() => {
@@ -194,7 +200,8 @@ const Scape = (() => {
 
   function prepare(v) {
     const p = v.place;
-    v.curves = { tempo: curve(p, 'tempo'), gain: curve(p, 'gain'), bright: curve(p, 'bright'), space: curve(p, 'space') };
+    v.curves = {};
+    for (const [k] of DRIVE_TARGETS) v.curves[k] = curve(p, k);
     v.table = feltTable(p, v.curves.tempo);
     v.driven = !p.felt || !!p.drive?.feltToo;
     for (const c of [v.a, v.b]) if (c) c.el.preservesPitch = !v.driven || p.drive?.keepPitch !== false;
@@ -234,7 +241,11 @@ const Scape = (() => {
     level.gain.value = 0; send.gain.value = 0; an.fftSize = 512;
     for (const c of [rec, felt]) if (c) c.gain.connect(filter);
     filter.connect(emph); emph.connect(pan); pan.connect(level); level.connect(an); an.connect(bus); level.connect(send); send.connect(reverb);
-    v = { key: `${place.audio}|${place.felt}`, place, a: rec || felt, b: rec && felt ? felt : null, rec: !!rec, filter, emph, pan, level, send, an, buf: new Float32Array(an.fftSize), target: 0, playing: false, lv: 0, rate: 1, u: 0 };
+    // delay: taken after the level so repeats follow distance and pan, with a tape-like darkening on each repeat
+    const echoIn = ctx.createGain(), echo = ctx.createDelay(2), echoTone = ctx.createBiquadFilter(), echoBack = ctx.createGain();
+    echoIn.gain.value = 0; echo.delayTime.value = (place.drive?.delay?.ms ?? DELAY_MS) / 1000; echoTone.type = 'lowpass'; echoTone.frequency.value = 3500; echoBack.gain.value = 0.2;
+    level.connect(echoIn); echoIn.connect(echo); echo.connect(echoTone); echoTone.connect(echoBack); echoBack.connect(echo); echo.connect(bus);
+    v = { key: `${place.audio}|${place.felt}`, place, a: rec || felt, b: rec && felt ? felt : null, rec: !!rec, echoIn, echo, echoBack, filter, emph, pan, level, send, an, buf: new Float32Array(an.fftSize), target: 0, playing: false, lv: 0, rate: 1, u: 0 };
     for (const c of [v.a, v.b]) if (c) c.el.addEventListener('ended', () => { if (c === leadOf(v)) finish(v); });
     prepare(v);
     voices.set(place.id, v);
@@ -283,7 +294,7 @@ const Scape = (() => {
     if (!v) return;
     v.playing = false;
     for (const c of [v.a, v.b]) if (c) { c.el.pause(); URL.revokeObjectURL(c.el.src); c.gain.disconnect(); }
-    v.level.disconnect(); v.send.disconnect(); v.an.disconnect();
+    v.level.disconnect(); v.send.disconnect(); v.an.disconnect(); v.echoIn.disconnect(); v.echo.disconnect(); v.echoBack.disconnect();
     voices.delete(id);
   }
 
@@ -309,6 +320,10 @@ const Scape = (() => {
     const octaves = (1 - b) * 3 * (d.bright?.depth ?? 1) * (c.bright ? amt : 0);
     v.filter.frequency.setTargetAtTime(20000 / 2 ** octaves, t, 0.1);
     v.send.gain.setTargetAtTime(c.space ? (read(c.space, u) + 1) / 2 * (d.space?.depth ?? 0) * amt : 0, t, 0.12);
+    const dl = c.delay ? clamp((read(c.delay, u) + 1) / 2 * (d.delay?.depth ?? 0) * amt, 0, 1) : 0;
+    v.echoIn.gain.setTargetAtTime(dl * 0.7, t, 0.12);
+    v.echo.delayTime.setTargetAtTime((d.delay?.ms ?? DELAY_MS) / 1000, t, 0.1);
+    v.echoBack.gain.setTargetAtTime(0.2 + dl * 0.45, t, 0.12);
     v.an.getFloatTimeDomainData(v.buf);
     let e = 0;
     for (let i = 0; i < v.buf.length; i++) e += v.buf[i] * v.buf[i];

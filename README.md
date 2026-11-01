@@ -45,8 +45,9 @@ An uploaded re-design plays exactly as uploaded, unless you tick **Apply to the 
 | Emphasis | louder | quieter |
 | Brightness | open | muffled |
 | Space | more reverb | drier |
+| Delay | stronger repeats | fewer, quieter repeats |
 
-Each target has a depth control and can be inverted to match how your axes are labelled.
+Each target has a depth control and can be inverted to match how your axes are labelled. Delay's depth control is labelled **Intensity**, and it also has a **Time** slider that sets the gap between repeats, from 20 to 2000 ms.
 
 **Listening**
 
