@@ -523,13 +523,13 @@ const Atlas = (() => {
     if (place && pin && !place.drive?.graph) setDriveGraph(place, pin.item);
   }
   function setDriveGraph(p, itemId) {
-    p.drive = p.drive || defaultDrive();
+    p.drive = fillDrive(p.drive || defaultDrive());
     p.drive.graph = itemId || null;
     const lines = graphLines(getItem(itemId));
     const pick = (re, not) => (lines.find(l => re.test(l.name) && l.id !== not) || null)?.id || null;
     p.drive.tempo.line = pick(/pace|tempo|time|speed|felt|passage/i) || lines[0]?.id || null;
     p.drive.gain.line = pick(/emph|loud|salien|intens|sound|attention/i, p.drive.tempo.line) || null;
-    p.drive.bright.line = null; p.drive.space.line = null;
+    for (const k of ['bright', 'space', 'delay']) p.drive[k].line = null;
     Scape.refresh(p);
   }
 
@@ -780,7 +780,7 @@ const Atlas = (() => {
     dockEl.hidden = !p || !hasSound(p);
     if (dockEl.hidden) return;
     $('#gd-name').textContent = p.name || 'Untitled';
-    $('#gd-sub').textContent = [p.who, !p.felt && !p.drive?.tempo?.line && !p.drive?.gain?.line ? 'no felt-time drive yet' : ''].filter(Boolean).join(' · ') || (p.felt ? (p.audio ? 'recording + re-design' : 're-designed take') : 'driven by the graph');
+    $('#gd-sub').textContent = [p.who, !p.felt && !DRIVE_TARGETS.some(([k]) => p.drive?.[k]?.line) ? 'no felt-time drive yet' : ''].filter(Boolean).join(' · ') || (p.felt ? (p.audio ? 'recording + re-design' : 're-designed take') : 'driven by the graph');
     const driven = (!p.felt || p.drive?.feltToo) && DRIVE_TARGETS.some(([k]) => p.drive?.[k]?.line);
     $('#gd-mix').classList.toggle('off', !(p.audio && p.felt) && !driven);
     drawDock();
@@ -807,7 +807,8 @@ const Atlas = (() => {
     }
     // the driving line over the waveform, so the listener sees what is steering the sound
     const d = p.drive, lines = d?.graph ? graphLinesCached(d.graph) : [];
-    const shown = lines.find(l => l.id === d?.tempo?.line) || lines.find(l => l.id === d?.gain?.line);
+    const steering = DRIVE_TARGETS.find(([k]) => d?.[k]?.line)?.[0];
+    const shown = steering && lines.find(l => l.id === d[steering].line);
     if (shown) {
       cx.beginPath();
       let pen = false;
@@ -1090,7 +1091,7 @@ const Atlas = (() => {
 
   function placeForm(p) {
     const up = () => { nodes.get(p.id)?.querySelector('.gp-name')?.replaceChildren(p.name || 'Untitled'); dirty = true; };
-    const d = p.drive || (p.drive = defaultDrive());
+    const d = p.drive = fillDrive(p.drive || defaultDrive());
     const graphs = [...itemsOf('map'), ...itemsOf('lens')];
     const linked = linkedItems(p).map(getItem).filter(Boolean);
     const gname = it => it.type === 'lens' ? `Lens · ${it.title}` : it.meta.title || 'Untitled map';
@@ -1126,7 +1127,9 @@ const Atlas = (() => {
         d.graph && p.felt && UI.check(!!d.feltToo, 'Apply to the “as felt” file', x => { d.feltToo = x; Scape.refresh(p); showDock(); }),
         d.graph && DRIVE_TARGETS.map(([k, label, tip]) => el('div', { class: 'drive-row', title: tip },
           el('div', { class: 'drive-top' }, el('b', {}, label), UI.select(d[k].line || '', [['', 'Off'], ...lines.map(l => [l.id, l.name])], id => { d[k].line = id || null; Scape.refresh(p); showDock(); })),
-          d[k].line && el('div', { class: 'drive-bot' }, UI.range(d[k].depth, 0, 2, 0.05, x => { d[k].depth = x; Scape.refresh(p); }, x => x.toFixed(2)), UI.check(d[k].inv, 'Invert', x => { d[k].inv = x; Scape.refresh(p); })))),
+          d[k].line && k === 'delay' && UI.field('Intensity', UI.range(d[k].depth, 0, 2, 0.05, x => { d[k].depth = x; Scape.refresh(p); }, x => x.toFixed(2))),
+          d[k].line && k === 'delay' && UI.field('Time', UI.range(d[k].ms, 20, 2000, 10, x => { d[k].ms = x; }, x => `${x} ms`)),
+          d[k].line && el('div', { class: 'drive-bot' }, k !== 'delay' && UI.range(d[k].depth, 0, 2, 0.05, x => { d[k].depth = x; Scape.refresh(p); }, x => x.toFixed(2)), UI.check(d[k].inv, 'Invert', x => { d[k].inv = x; Scape.refresh(p); })))),
         d.graph && d.tempo.line && UI.check(d.keepPitch !== false, 'Keep pitch when the tempo changes', x => { d.keepPitch = x; Scape.refresh(p); }),
       ]),
       el('div', { class: 'btn-grid' }, UI.btn('Link to…', 'link', () => setTool('link')), UI.btn('Delete', 'trash', () => removeSel(), 'danger')),
