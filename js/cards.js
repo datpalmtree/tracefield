@@ -164,11 +164,11 @@ const Cards = {
       n.innerHTML = '';
       n.style.setProperty('--c', it.color);
       const m = it.meta, v = it.view;
-      const sub = [m.participant, m.session && 'Test ' + m.session, m.condition].filter(Boolean).join(' · ');
+      const sub = [m.participant, sessionLabel(m.session, 'Test '), m.condition].filter(Boolean).join(' · ');
       const editing = Board.edit?.id === it.id, playing = Player.cur?.id === it.id;
       const head = el('div', { class: 'card-head' },
         el('span', { class: 'swatch' }),
-        el('div', { class: 'titles' }, el('b', {}, m.title || 'Untitled map'), el('small', {}, sub || 'No participant / test yet')),
+        el('div', { class: 'titles' }, el('b', {}, m.title || 'Untitled map'), el('small', {}, m.participant && el('i', { class: 'p-dot', style: { background: participantColor(it) }, title: 'Participant colour (used by lenses)' }), sub || 'No participant / test yet')),
         el('div', { class: 'acts' },
           it.asset && iconBtn('scan', 'Show the scan underneath', v.ghost > 0, () => { v.ghost = v.ghost > 0 ? 0 : 0.5; Board.refresh(it.id, false); commit(); }),
           iconBtn(playing ? 'pause' : 'play', 'Play — sweep a playhead along X', playing, () => { Player.toggle(it.id); Board.refresh(it.id, false); }),
@@ -256,8 +256,9 @@ const Cards = {
         const row = el('div', { class: 'd-row', draggable: 'true' },
           el('div', { class: 'd-top' },
             el('span', { class: 'grip', html: ic('grip') }),
-            el('span', { class: 'swatch', style: { background: m.color } }),
-            el('div', { class: 'd-t' }, el('b', {}, m.meta.participant || m.meta.title || 'Map'), el('small', {}, [m.meta.session && 'Test ' + m.meta.session, m.meta.condition].filter(Boolean).join(' · ') || m.meta.title || '')),
+            // the colour this lens draws the map in, so a line can be traced back to its layer
+            el('span', { class: 'swatch', style: { background: it.opts.colorBy === 'line' || it.opts.colorBy === 'ink' ? m.color : D.series.find(s => s.map === m)?.color || m.color } }),
+            el('div', { class: 'd-t' }, el('b', {}, m.meta.participant || m.meta.title || 'Map'), el('small', {}, [sessionLabel(m.meta.session, 'Test '), m.meta.condition].filter(Boolean).join(' · ') || m.meta.title || '')),
             m.asset && iconBtn('scan', 'Include this scan in the stack (set stack opacity in the inspector)', !it.underOff?.[mid], () => {
               it.underOff = it.underOff || {};
               it.underOff[mid] ? delete it.underOff[mid] : (it.underOff[mid] = true);
@@ -300,23 +301,27 @@ const Cards = {
   },
 
   note: {
+    // a bordered glass box whose inside is click-through: only the text, the edges and the corner catch the pointer,
+    // so a big note can frame cards and leave them usable. The text sizes itself to the box.
     render(n, it) {
       n.innerHTML = '';
-      n.style.setProperty('--note', it.color || NOTE_COLORS[0]);
-      n.style.setProperty('--rot', (it.rot || 0) + 'deg');
-      const t = el('div', { class: 'note-text', contenteditable: 'false', spellcheck: 'false', style: { fontSize: (it.fs || 24) + 'px' } });
-      t.textContent = it.text || '';
-      t.addEventListener('blur', () => {
-        t.contentEditable = 'false';
-        n.classList.remove('typing');
-        if (it.text !== t.innerText) { it.text = t.innerText; commit(); }
-      });
-      t.addEventListener('keydown', e => { if (e.key === 'Escape') t.blur(); e.stopPropagation(); });
-      n.append(el('div', { class: 'pin' }), t, el('div', { class: 'resize' }));
+      n.style.setProperty('--tint', it.color || NOTE_COLORS[0]);
+      const t = editable(n, it, 'note-text', 'text');
+      t.addEventListener('input', () => Cards.note.fit(n, it));
+      n.append(t, ...['t', 'r', 'b', 'l'].map(s => el('i', { class: 'edge ' + s })), el('div', { class: 'resize' }));
+      this.fit(n, it);
+    },
+    fit(n, it) {
+      const s = Math.min(it.w, it.h), pad = Math.round(clamp(s * 0.07, 8, 80)), bw = round(clamp(s * 0.004, 1.5, 8), 1);
+      n.style.setProperty('--bw', bw + 'px');
+      n.style.setProperty('--r', Math.round(clamp(s * 0.05, 8, 40)) + 'px');
+      // fills the box, except when the note frames cards: then it stays a heading so what it frames stays visible
+      const cap = n.classList.contains('framing') ? 1.15 * Math.sqrt(it.w * it.h) ** 0.6 : it.h;
+      fitText(n.querySelector('.note-text'), it.w - 2 * (pad + bw), it.h - 2 * (pad + bw), cap, pad);
     },
     dbl(e, it, n) { Cards.note.edit(n); },
     edit(n) {
-      const t = n.querySelector('.note-text, .text-body');
+      const t = n.querySelector('.note-text, .text-body, .group-title');
       if (!t) return;
       t.contentEditable = 'true';
       n.classList.add('typing');
@@ -329,16 +334,53 @@ const Cards = {
   text: {
     render(n, it) {
       n.innerHTML = '';
-      const t = el('div', { class: 'text-body', contenteditable: 'false', spellcheck: 'false', style: { fontSize: (it.fs || 40) + 'px', color: it.color || 'var(--text)' } });
-      t.textContent = it.text || '';
-      t.addEventListener('blur', () => {
-        t.contentEditable = 'false';
-        n.classList.remove('typing');
-        if (it.text !== t.innerText) { it.text = t.innerText; commit(); }
-      });
-      t.addEventListener('keydown', e => { if (e.key === 'Escape') t.blur(); e.stopPropagation(); });
+      const t = editable(n, it, 'text-body', 'text');
+      t.style.color = it.color || 'var(--text)';
+      t.addEventListener('input', () => Cards.text.fit(n, it));
       n.append(t, el('div', { class: 'resize' }));
+      this.fit(n, it);
+    },
+    fit(n, it) { fitText(n.querySelector('.text-body'), it.w - 12, it.h - 8, it.h, 4); },
+    dbl(e, it, n) { Cards.note.edit(n); },
+  },
+
+  group: {
+    // frame drawn by G around a cluster; everything lying inside it moves with it (see Board.contents)
+    render(n, it) {
+      n.innerHTML = '';
+      n.style.setProperty('--tint', it.color || NOTE_COLORS[0]);
+      n.style.fontSize = (it.fs || 28) + 'px';
+      n.append(el('div', { class: 'group-head' }, editable(n, it, 'group-title', 'title')), el('div', { class: 'resize' }));
     },
     dbl(e, it, n) { Cards.note.edit(n); },
   },
 };
+
+/** Largest font size (up to cap) at which t's text fits w × h without overflowing; t sits at (pad, pad). */
+function fitText(t, w, h, cap, pad) {
+  if (!t) return;
+  Object.assign(t.style, { left: pad + 'px', top: pad + 'px', maxWidth: Math.max(1, w) + 'px' });
+  let lo = 4, hi = Math.max(4, cap);
+  for (let i = 0; i < 12; i++) {
+    const m = (lo + hi) / 2;
+    t.style.fontSize = m + 'px';
+    if (t.scrollWidth <= w + 0.5 && t.offsetHeight <= h) lo = m; else hi = m;
+  }
+  t.style.fontSize = round(lo, 1) + 'px';
+}
+
+/** contenteditable text bound to it[key]; editing starts via Cards.note.edit */
+function editable(n, it, cls, key) {
+  const t = el('div', { class: cls, contenteditable: 'false', spellcheck: 'false' });
+  t.textContent = it[key] || '';
+  t.addEventListener('blur', () => {
+    t.contentEditable = 'false';
+    n.classList.remove('typing');
+    if (it[key] !== t.innerText) { it[key] = t.innerText; commit(); Inspector.show(); }
+  });
+  t.addEventListener('keydown', e => {
+    if (e.key === 'Escape' || (e.key === 'Enter' && key === 'title')) { e.preventDefault(); t.blur(); }
+    e.stopPropagation();
+  });
+  return t;
+}

@@ -21,6 +21,8 @@ const Atlas = (() => {
   const placeOf = id => A().places.find(p => p.id === id);
   const pinOf = id => A().pins.find(p => p.id === id);
   const linkOf = id => A().links.find(l => l.id === id);
+  /** Sound points a pinned graph is linked to. */
+  const soundsOf = pin => A().links.map(l => l.a === pin.id ? l.b : l.b === pin.id ? l.a : null).map(placeOf).filter(p => p && hasSound(p));
   const hasSound = p => !!(p && (p.audio || p.felt));
   const anchor = p => p.kind === 'region' ? ringCentroid(p.ring) : [p.lng, p.lat];
   const placeColor = n => PALETTE[(n * 3) % PALETTE.length];
@@ -258,8 +260,10 @@ const Atlas = (() => {
     const title = it.type === 'lens' ? it.title : it.meta.title;
     const sub = it.type === 'lens' ? `${it.maps.length} maps` : [it.meta.participant, it.meta.condition].filter(Boolean).join(' · ');
     const plot = el('div', { class: 'plot gn-plot' });
+    const sounds = soundsOf(pin), driving = sounds.length > 0 && sounds.every(p => p.drive?.graph === pin.item);
     const n = el('div', { class: 'gn' + (pin.small ? ' small' : ''), dataset: { gid: pin.id }, style: { '--c': it.color || Theme.t().accent } },
       el('div', { class: 'gn-head' }, el('span', { class: 'swatch' }), el('div', { class: 'titles' }, el('b', {}, title || 'Graph'), sub && el('small', {}, sub)),
+        sounds.length > 0 && el('button', { class: 'ibtn gn-drive' + (driving ? ' on' : ''), title: driving ? `Shaping the sound of ${sounds.map(p => p.name).join(', ')}` : `Use this graph to shape the sound of ${sounds.map(p => p.name).join(', ')}`, 'aria-label': 'Make this the graph that shapes the linked sound', html: ic('wave') }),
         el('button', { class: 'ibtn gn-size', title: 'Collapse / expand', 'aria-label': 'Collapse or expand', html: ic(pin.small ? 'plus' : 'minus') })),
       plot, el('div', { class: 'resize' }));
     n.classList.toggle('selected', sel === pin.id);
@@ -313,15 +317,19 @@ const Atlas = (() => {
       // pinned right on its linked place: the link already says where it belongs
       const pv = V(pin.id);
       pv.onPlace = A().links.some(l => (l.a === pin.id || l.b === pin.id) && (() => { const q = placeOf(l.a === pin.id ? l.b : l.a); if (!q) return false; const [x, y] = anchor(q); return Math.abs(x - pin.lng) + Math.abs(y - pin.lat) < 1e-4; })());
-      const small = pin.small || cam.zoom < pin.z0 - 3.5;
+      // zooming out from where it was pinned, the card and its offset shrink together (at a gentler rate than the map),
+      // so it stays beside its spot; never larger than set. Far out it collapses to a legible title pill.
+      const k = clamp(2 ** ((cam.zoom - pin.z0) * 0.6), 0.22, 1);
+      const small = pin.small || k < 0.3, sk = small ? Math.max(k, 0.75) : k;
       const cardDims = small ? [190, 40] : [pin.w, pin.h];
       if (n.classList.contains('far') !== (small && !pin.small)) n.classList.toggle('far', small && !pin.small);
       dot.style.transform = `translate(${s.x}px, ${s.y}px)`;
       dot.classList.toggle('gone', s.hidden || pv.onPlace);
       n.classList.toggle('gone', s.hidden);
-      n.style.transform = `translate(${s.x + pin.dx}px, ${s.y + pin.dy}px)`;
+      const x = s.x + pin.dx * k, y = s.y + pin.dy * k;
+      n.style.transform = `translate(${x}px, ${y}px) scale(${sk})`;
       if (!small) { n.style.width = pin.w + 'px'; n.style.height = pin.h + 'px'; } else { n.style.width = ''; n.style.height = ''; }
-      pv.s = s; pv.box = { x: s.x + pin.dx, y: s.y + pin.dy, w: cardDims[0], h: cardDims[1] };
+      pv.s = s; pv.k = k; pv.box = { x, y, w: cardDims[0] * sk, h: cardDims[1] * sk };
     }
     drawSvg();
   }
@@ -454,6 +462,7 @@ const Atlas = (() => {
     const id = n.dataset.gid, p = placeOf(id), pin = pinOf(id);
     if (t.closest('.gp-play')) { e.stopPropagation(); toggle(p); return; }
     if (t.closest('.gn-size')) { pin.small = !pin.small; rebuild(); commit(); return; }
+    if (t.closest('.gn-drive')) { e.stopPropagation(); makeDriver(pin); return; }
     if (exhibitOn) { if (p && hasSound(p)) toggle(p); else if (p) select(id); return; }
     if (tool === 'link') return startLink(e, id);
     if (t.closest('.resize') && pin) return resizePin(e, pin);
@@ -493,18 +502,19 @@ const Atlas = (() => {
     }, () => { if (moved) commit(); });
   }
   function dragPin(e, pin) {
-    const x0 = e.clientX, y0 = e.clientY, d0 = [pin.dx, pin.dy];
+    // dx/dy are stored at full size; the card is drawn scaled by k
+    const x0 = e.clientX, y0 = e.clientY, d0 = [pin.dx, pin.dy], k = V(pin.id).k || 1;
     let moved = false;
-    track(e, ev => { moved = true; pin.dx = d0[0] + ev.clientX - x0; pin.dy = d0[1] + ev.clientY - y0; dirty = true; }, () => { if (moved) commit(); });
+    track(e, ev => { moved = true; pin.dx = d0[0] + (ev.clientX - x0) / k; pin.dy = d0[1] + (ev.clientY - y0) / k; dirty = true; }, () => { if (moved) commit(); });
   }
   function dragAnchor(e, pin) {
     if (exhibitOn) return;
     track(e, ev => { const at = Geo.unproject(ev.clientX, ev.clientY); if (at) { pin.lng = round(at[0], 6); pin.lat = round(at[1], 6); dirty = true; } }, () => commit());
   }
   function resizePin(e, pin) {
-    const x0 = e.clientX, y0 = e.clientY, w0 = pin.w, h0 = pin.h;
+    const x0 = e.clientX, y0 = e.clientY, w0 = pin.w, h0 = pin.h, k = V(pin.id).k || 1;
     const redraw = rafThrottle(() => renderPlot(pin));
-    track(e, ev => { pin.w = Math.round(Math.max(260, w0 + ev.clientX - x0)); pin.h = Math.round(Math.max(170, h0 + ev.clientY - y0)); dirty = true; redraw(); }, () => commit());
+    track(e, ev => { pin.w = Math.round(Math.max(260, w0 + (ev.clientX - x0) / k)); pin.h = Math.round(Math.max(170, h0 + (ev.clientY - y0) / k)); dirty = true; redraw(); }, () => commit());
   }
   function startLink(e, from) {
     tempLink = { from, x: e.clientX, y: e.clientY };
@@ -522,6 +532,16 @@ const Atlas = (() => {
     const place = placeOf(l.a) || placeOf(l.b), pin = pinOf(l.a) || pinOf(l.b);
     if (place && pin && !place.drive?.graph) setDriveGraph(place, pin.item);
   }
+  /** One click on a graph card: it becomes the graph shaping every sound point it is linked to. */
+  function makeDriver(pin) {
+    const sounds = soundsOf(pin).filter(p => p.drive?.graph !== pin.item);
+    if (!sounds.length) return;
+    for (const p of sounds) setDriveGraph(p, pin.item);
+    rebuild(); showDock(); Inspector.show(); commit();
+    const it = getItem(pin.item);
+    toast(`${(it.type === 'lens' ? it.title : it.meta.title) || 'This graph'} now shapes ${sounds.map(p => p.name || 'the point').join(', ')}`);
+  }
+
   function setDriveGraph(p, itemId) {
     p.drive = fillDrive(p.drive || defaultDrive());
     p.drive.graph = itemId || null;

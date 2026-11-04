@@ -31,6 +31,9 @@
   --plot-grid: rgba(255, 255, 255, .055);
   --pin: #ff4f5e;
   --shadow: 0 18px 40px -14px rgba(0, 0, 0, .65), 0 4px 12px rgba(0, 0, 0, .35);
+  --glass: rgba(30, 32, 42, .66);
+  --glass-faint: rgba(30, 32, 42, .28);
+  --glass-hi: rgba(255, 255, 255, .07);
   color-scheme: dark;
 }
 
@@ -59,6 +62,9 @@
   --plot-grid: rgba(0, 0, 0, .07);
   --pin: #e63950;
   --shadow: 0 16px 34px -14px rgba(60, 45, 20, .35), 0 3px 10px rgba(60, 45, 20, .12);
+  --glass: rgba(255, 253, 248, .62);
+  --glass-faint: rgba(255, 253, 248, .3);
+  --glass-hi: rgba(255, 255, 255, .75);
   color-scheme: light;
 }
 
@@ -71,7 +77,10 @@ body {
   -webkit-font-smoothing: antialiased;
   opacity: 0;
   transition: opacity .3s;
+  /* no stray text selection while dragging; fields and notes being typed in opt back in */
+  user-select: none; -webkit-user-select: none;
 }
+input, textarea, [contenteditable="true"] { user-select: text; -webkit-user-select: text; }
 body.ready { opacity: 1; }
 [hidden] { display: none !important; }
 button { font: inherit; color: inherit; }
@@ -245,21 +254,54 @@ kbd {
 .scan-name { overflow: hidden; text-overflow: ellipsis; }
 .card-scan:hover .scan-head, .card-scan.selected .scan-head { opacity: 1; }
 
-/* notes + text */
+/* notes + frames: tinted glass, no backdrop blur */
+.card-note, .card-group {
+  --tint: #9aa3b8;
+  --edge: color-mix(in srgb, var(--tint) 34%, var(--line));
+}
+/* a note is a bordered box whose inside lets clicks through to what it frames; text, edges and corner catch the pointer */
 .card-note {
-  background: var(--note); color: #23211c; border-radius: 3px; transform: rotate(var(--rot, 0deg));
-  box-shadow: 0 14px 22px -10px rgba(0, 0, 0, .45), 0 2px 4px rgba(0, 0, 0, .15);
+  pointer-events: none;
+  border: var(--bw, 1.5px) solid color-mix(in srgb, var(--tint) 85%, transparent); border-radius: var(--r, 12px);
+  background:
+    linear-gradient(160deg, color-mix(in srgb, var(--tint) 22%, transparent), color-mix(in srgb, var(--tint) 6%, transparent) 60%),
+    var(--glass);
+  box-shadow: inset 0 1px 0 var(--glass-hi), var(--shadow);
 }
-.card-note::after { content: ''; position: absolute; inset: auto 0 0 0; height: 18px; background: linear-gradient(transparent, rgba(0, 0, 0, .05)); pointer-events: none; }
-.card-note .pin { --pin: #3a7bff; }
+.card-note.framing { background: linear-gradient(180deg, color-mix(in srgb, var(--tint) 9%, transparent), color-mix(in srgb, var(--tint) 2%, transparent) 40%); box-shadow: none; }
+.card-note > * { pointer-events: auto; }
 .note-text {
-  padding: 22px 16px 14px; font-family: var(--hand); font-weight: 600; line-height: 1.08; height: 100%;
-  overflow: hidden; outline: none; white-space: pre-wrap; word-break: break-word;
+  position: absolute; width: fit-content; font: 450 20px/1.25 var(--font); letter-spacing: -.01em; cursor: grab;
+  outline: none; white-space: pre-wrap; overflow-wrap: break-word;
 }
+.note-text::first-line { font-weight: 650; }
+.card-note .edge { position: absolute; --g: calc(12px * var(--iz, 1)); cursor: grab; }
+.edge.t, .edge.b { left: 0; right: 0; height: var(--g); }
+.edge.l, .edge.r { top: 0; bottom: 0; width: var(--g); }
+.edge.t { top: calc(var(--g) / -2 - var(--bw, 1.5px) / 2); }
+.edge.b { bottom: calc(var(--g) / -2 - var(--bw, 1.5px) / 2); }
+.edge.l { left: calc(var(--g) / -2 - var(--bw, 1.5px) / 2); }
+.edge.r { right: calc(var(--g) / -2 - var(--bw, 1.5px) / 2); }
+.card-note .resize { width: max(16px, calc(14px * var(--iz, 1))); height: max(16px, calc(14px * var(--iz, 1))); }
+.card-group {
+  border-radius: .6em;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--tint) 11%, transparent), color-mix(in srgb, var(--tint) 3%, transparent) 50%),
+    var(--glass-faint);
+  box-shadow: inset 0 1px 0 var(--glass-hi), 0 0 0 1px var(--edge);
+  cursor: default;
+}
+.card-note.selected { box-shadow: 0 0 0 2px var(--accent), 0 0 0 7px var(--accent-soft); }
+.card-group.selected { box-shadow: inset 0 1px 0 var(--glass-hi), 0 0 0 2px var(--accent), 0 0 0 7px var(--accent-soft); }
+.group-head { display: flex; align-items: baseline; gap: .45em; padding: .55em .8em 0; max-width: 100%; cursor: grab; }
+.group-head::before { content: ''; flex: none; width: .4em; height: .4em; border-radius: 50%; background: var(--tint); transform: translateY(-.12em); }
+.group-title { font: 600 1em/1.15 var(--font); letter-spacing: -.02em; outline: none; white-space: pre; overflow: hidden; text-overflow: ellipsis; min-width: 1em; }
+.group-title:empty::before { content: 'Untitled group'; opacity: .35; }
+.card-group .resize { width: 22px; height: 22px; }
 .card-text { background: transparent; box-shadow: none; }
 .card-text.selected { box-shadow: 0 0 0 1.5px var(--accent); }
-.text-body { font-weight: 700; letter-spacing: -.025em; line-height: 1.05; white-space: pre-wrap; outline: none; padding: 4px 6px; height: 100%; overflow: hidden; }
-.card.typing .note-text, .card.typing .text-body { user-select: text; -webkit-user-select: text; cursor: text; }
+.text-body { position: absolute; width: fit-content; font-weight: 700; letter-spacing: -.025em; line-height: 1.05; white-space: pre-wrap; overflow-wrap: break-word; outline: none; }
+.card.typing .note-text, .card.typing .text-body, .card.typing .group-title { user-select: text; -webkit-user-select: text; cursor: text; }
 .text-body:empty::before, .note-text:empty::before { content: 'Double-click to write'; opacity: .35; }
 
 .resize {
@@ -444,6 +486,8 @@ table.stats td.down { color: var(--accent-2); }
 .lg input[type=color] { width: 22px; height: 22px; }
 .lg-l { flex: 1; text-align: left; background: none; border: none; color: var(--text); font-size: 12.5px; padding: 3px 0; cursor: pointer; font-weight: 500; }
 .lg.off .lg-l { color: var(--faint); text-decoration: line-through; }
+/* participant colour, as lenses draw it */
+.p-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: .05em; }
 
 .matrix { display: grid; gap: 2px; font-size: 10.5px; align-items: center; }
 .mx-h { text-align: center; font: 600 10px var(--mono); }
@@ -651,7 +695,9 @@ body.atlas-on .panel { bottom: 34px; }
 .gp-dot .ic { width: 16px; height: 16px; }
 .gp.region .gp-dot { border-radius: 9px; }
 .gp-ring { position: absolute; left: -15px; top: -15px; width: 30px; height: 30px; border-radius: 50%; pointer-events: none; }
-.gp.sound:not(.playing) .gp-ring { animation: gp-breathe 3.6s ease-out infinite; border: 2px solid var(--c); }
+/* a point with sound shows a still ring; it only ripples while its audio is playing */
+.gp.sound .gp-ring { border: 2px solid var(--c); opacity: .35; }
+.gp.sound.playing .gp-ring { animation: gp-breathe 1.8s ease-out infinite; }
 @keyframes gp-breathe { 0% { transform: scale(1); opacity: .85; } 70%, 100% { transform: scale(2.3); opacity: 0; } }
 .gp-name {
   position: absolute; left: 0; top: 20px; transform: translateX(-50%); padding: 2px 8px; border-radius: 7px; white-space: nowrap; pointer-events: auto; cursor: grab;
@@ -670,7 +716,7 @@ body.atlas-on .panel { bottom: 34px; }
 /* pinned graphs */
 .gn-anchor { position: absolute; left: -6px; top: -6px; width: 12px; height: 12px; border-radius: 50%; background: var(--c); border: 2px solid #fff; pointer-events: auto; cursor: grab; box-shadow: 0 1px 6px rgba(0, 0, 0, .6); }
 .gn {
-  position: absolute; left: 0; top: 0; display: flex; flex-direction: column; overflow: hidden; pointer-events: auto;
+  position: absolute; left: 0; top: 0; display: flex; flex-direction: column; overflow: hidden; pointer-events: auto; transform-origin: 0 0;
   background: var(--card); border: 1px solid var(--line-2); border-radius: 13px; box-shadow: var(--shadow);
 }
 .gn.selected { outline: 2px solid var(--accent); outline-offset: 1px; }

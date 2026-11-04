@@ -118,7 +118,7 @@ function sampleAt(pts, u) {
 /* ---------- colour ---------- */
 
 const PALETTE = ['#4cc9f0', '#ff4fa3', '#c6ff3d', '#ffb020', '#9d7cff', '#2ee6a6', '#ff6b4a', '#5aa9ff', '#ffd84f', '#ff9ecd', '#00d1c1', '#c77dff'];
-const NOTE_COLORS = ['#ffe873', '#ffb4c8', '#a8f0d0', '#a9d4ff', '#d9c3ff', '#ffcf99'];
+const NOTE_COLORS = ['#9aa3b8', '#ffd84f', '#ff7aa8', '#2ee6a6', '#5aa9ff', '#9d7cff', '#ff8a4a'];
 const PEN_COLORS = ['#ff4f5e', '#ffb020', '#c6ff3d', '#4cc9f0', '#9d7cff', '#f4f1ea', '#1b1c23'];
 
 function hexToRgb(h) {
@@ -175,6 +175,10 @@ function colorFor(field, value) {
   if (!r[value]) r[value] = PALETTE[Object.keys(r).length % PALETTE.length];
   return r[value];
 }
+/** A map's participant colour: what a lens draws that participant's lines in, shown on cards and in the library too. */
+const participantColor = m => colorFor('participant', m.meta?.participant || '—');
+/** "Test 1" / "S1" for numbered sessions; a named one ("library") reads as its name. */
+const sessionLabel = (v, prefix) => (v == null || v === '' ? '' : /^\d+$/.test(String(v).trim()) ? prefix + v : String(v));
 
 const Theme = {
   cache: null,
@@ -229,7 +233,7 @@ function freshState() {
     items: [], links: [], strokes: [],
     colorRules: {},
     template: null,
-    settings: { autoDigitize: true, theme: 'dark', snap: false },
+    settings: { autoDigitize: true, theme: 'dark', snap: false, soundFx: { gain: 0, bright: 0, space: 0, delay: 0 } },
     z: 10,
     atlas: defaultAtlas(),
     geo: { on: false, basemap: 'satellite', cam: { lng: 12, lat: 30, zoom: 1.6, pitch: 0, bearing: 0 }, mix: 1, linkStyle: 'arrow' },
@@ -248,7 +252,7 @@ function defaultAxes() {
 function defaultMapView() { return { curve: 'smooth', qx: 0, qy: 0, width: 2.6, points: false, grid: true, ticks: false, ghost: 0, sound: false, dur: 8 }; }
 function defaultLensOpts() {
   return {
-    mode: 'overlay', colorBy: 'line', groupBy: 'line', avg: true, band: 'sd', showLines: true, pull: 0,
+    mode: 'overlay', colorBy: 'participant', groupBy: 'line', avg: true, band: 'sd', showLines: true, pull: 0,
     normalize: 'none', qx: 0, qy: 0, curve: 'smooth', width: 2, opacity: 0.8, ticks: false, grid: true,
     under: 0, blend: 'normal', drawer: true, sound: false, dur: 10, matrix: 'series',
   };

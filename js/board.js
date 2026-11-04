@@ -61,9 +61,11 @@ const Minimap = (() => {
     map = { x: ox, y: oy, s };
     const T = Theme.t();
     const sel = new Set(Board.selection());
-    for (const it of [...S.items].sort((a, b) => a.z - b.z)) {
-      cx.fillStyle = it.type === 'note' ? (it.color || NOTE_COLORS[0]) : it.type === 'scan' ? '#e9e4d8' : it.type === 'lens' ? rgba(T.accent, 0.5) : it.type === 'map' ? rgba(it.color || T.accent, 0.55) : T.muted;
+    for (const it of [...S.items].sort((a, b) => (b.type === 'group') - (a.type === 'group') || a.z - b.z)) {
+      if (it.type === 'group') { cx.strokeStyle = sel.has(it.id) ? T.accent : rgba(it.color || NOTE_COLORS[0], 0.7); cx.lineWidth = 1; cx.strokeRect((it.x - ox) * s, (it.y - oy) * s, it.w * s, it.h * s); continue; }
+      cx.fillStyle = it.type === 'note' ? rgba(it.color || NOTE_COLORS[0], 0.3) : it.type === 'scan' ? '#e9e4d8' : it.type === 'lens' ? rgba(T.accent, 0.5) : it.type === 'map' ? rgba(it.color || T.accent, 0.55) : T.muted;
       cx.fillRect((it.x - ox) * s, (it.y - oy) * s, Math.max(2, it.w * s), Math.max(2, it.h * s));
+      if (it.type === 'note') { cx.strokeStyle = it.color || NOTE_COLORS[0]; cx.lineWidth = 1; cx.strokeRect((it.x - ox) * s, (it.y - oy) * s, it.w * s, it.h * s); }
       if (sel.has(it.id)) { cx.strokeStyle = T.accent; cx.lineWidth = 1.5; cx.strokeRect((it.x - ox) * s, (it.y - oy) * s, it.w * s, it.h * s); }
     }
     cx.strokeStyle = T.text; cx.globalAlpha = 0.8; cx.lineWidth = 1.2;
@@ -95,6 +97,8 @@ const Board = (() => {
     window.addEventListener('blur', () => { space = false; B.classList.remove('space'); });
     window.addEventListener('resize', () => { applyView(); });
     Minimap.init();
+    // text is fitted by measuring, so refit once the web fonts have arrived
+    document.fonts?.ready.then(() => S.items.forEach(i => Cards[i.type]?.fit?.(nodes.get(i.id), i)));
   }
 
   /* ---------- view ---------- */
@@ -156,7 +160,8 @@ const Board = (() => {
     const n = nodes.get(it.id);
     if (!n) return;
     n.style.left = it.x + 'px'; n.style.top = it.y + 'px'; n.style.width = it.w + 'px'; n.style.height = it.h + 'px';
-    n.style.zIndex = it.z;
+    // frames always sit beneath cards; bigger frames behind smaller (nested) ones
+    n.style.zIndex = it.type === 'group' ? -Math.min(1e6, Math.round(Math.sqrt(it.w * it.h))) : it.z;
     n.classList.toggle('selected', sel.has(it.id));
     n.classList.toggle('locked', !!it.locked);
   }
@@ -165,6 +170,7 @@ const Board = (() => {
     const it = getItem(id);
     if (!it) return;
     place(it); fill(it);
+    syncFrames();
     if (deep && it.type === 'map') for (const l of itemsOf('lens')) if (l.maps.includes(id)) fill(l);
     drawLinks(); Minimap.draw();
   }
@@ -182,7 +188,7 @@ const Board = (() => {
     for (const id of [...sel]) if (!getItem(id)) sel.delete(id);
     if (edit && !getItem(edit.id)) edit = null;
     S.items.forEach(build);
-    drawInk(); applyView(); Welcome.update(); Inspector.show();
+    syncFrames(); drawInk(); applyView(); Welcome.update(); Inspector.show();
   }
   function add(it) {
     it.id = it.id || uid(it.type[0]);
@@ -202,7 +208,7 @@ const Board = (() => {
     Atlas.forget(set);
     for (const id of set) { nodes.get(id)?.remove(); nodes.delete(id); sel.delete(id); }
     for (const l of itemsOf('lens')) { const n = l.maps.length; l.maps = l.maps.filter(m => !set.has(m)); if (n !== l.maps.length) fill(l); }
-    drawInk(); syncSel(); commit(); Welcome.update();
+    drawInk(); syncFrames(); syncSel(); commit(); Welcome.update();
   }
   function duplicate(ids) {
     const out = [];
@@ -287,15 +293,24 @@ const Board = (() => {
     if (tool === 'eraser') return startErase(e);
     if (tool === 'note' || tool === 'text') {
       const [x, y] = toWorld(e.clientX, e.clientY);
-      const it = tool === 'note' ? newNote(x - 110, y - 20) : newText(x, y - 30);
+      const it = tool === 'note' ? newNote(x - 120, y - 30) : newText(x, y - 30);
       setTool('select'); select([it.id]); commit();
       setTimeout(() => Cards.note.edit(nodes.get(it.id)), 30);
       return;
     }
     if (tool === 'connect') { if (card) startConnect(e, card.dataset.id); else startPan(e); return; }
     if (t.closest('.resize') && card) return startResize(e, card.dataset.id);
+    // the open inside of a note or frame acts like the board (marquee; a click selects it) until it is selected,
+    // then it drags. A note's text, edges and a frame's title always drag.
+    const host = !card || (card.classList.contains('card-group') && !t.closest('.group-head')) ? frameAt(e) : null;
+    if (host) return sel.has(host.id) ? startDrag(e, host.id) : startMarquee(e, host.id);
     if (card) return startDrag(e, card.dataset.id);
     startMarquee(e);
+  }
+  /** The note (they sit above) or else the innermost group frame under the pointer. */
+  function frameAt(e) {
+    const [x, y] = toWorld(e.clientX, e.clientY), hit = S.items.filter(i => isFrame(i) && x >= i.x && x <= i.x + i.w && y >= i.y && y <= i.y + i.h);
+    return hit.filter(i => i.type === 'note').sort((a, b) => b.z - a.z)[0] || hit.sort((a, b) => a.w * a.h - b.w * b.h)[0] || null;
   }
 
   function startPan(e) {
@@ -318,10 +333,14 @@ const Board = (() => {
       sel.add(id); syncSel();
     } else if (!sel.has(id)) { sel.clear(); sel.add(id); syncSel(); }
     const [sx, sy] = toWorld(e.clientX, e.clientY);
-    const moving = [...sel].map(getItem).filter(i => i && !i.locked);
+    const picked = [...sel].map(getItem).filter(Boolean);
+    const moving = [...new Set([...picked, ...picked.filter(isFrame).flatMap(contents)])].filter(i => !i.locked);
     const orig = moving.map(i => [i, i.x, i.y]);
-    moving.forEach(i => { i.z = ++S.z; place(i); });
-    const hasMaps = moving.some(i => i.type === 'map');
+    moving.sort((a, b) => a.z - b.z).forEach(i => { i.z = ++S.z; place(i); });
+    // a note keeps sitting above what it frames
+    for (const n of moving.filter(i => i.type === 'note')) if (contents(n).length) { n.z = ++S.z; place(n); }
+    const hasMaps = moving.some(i => i.type === 'map') && moving.length === picked.length;
+    const movingIds = new Set(moving.map(i => i.id));
     let moved = false, drop = null;
     track(e, ev => {
       if (!moved && Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) < 4) return;
@@ -335,13 +354,14 @@ const Board = (() => {
       }
       drawLinks();
       if (hasMaps) {
-        const l = lensAt(wx, wy, sel);
+        const l = lensAt(wx, wy, movingIds);
         if (l !== drop) { if (drop) nodes.get(drop.id)?.classList.remove('drop-target'); drop = l; if (l) nodes.get(l.id)?.classList.add('drop-target'); }
       }
       Minimap.draw();
     }, () => {
       B.classList.remove('dragging-cards');
       if (!moved) { Cards[it.type]?.click?.(e, it); return; }
+      syncFrames();
       if (drop) {
         nodes.get(drop.id)?.classList.remove('drop-target');
         const ids = moving.filter(i => i.type === 'map').map(i => i.id);
@@ -355,7 +375,7 @@ const Board = (() => {
     const it = getItem(id);
     if (!it || it.locked) return;
     const [sx, sy] = toWorld(e.clientX, e.clientY), ow = it.w, oh = it.h, ratio = ow / oh;
-    const min = { map: [340, 250], lens: [520, 340], scan: [80, 60], note: [120, 90], text: [80, 40] }[it.type] || [80, 60];
+    const min = { map: [340, 250], lens: [520, 340], scan: [80, 60], note: [60, 40], text: [40, 24], group: [160, 100] }[it.type] || [80, 60];
     track(e, ev => {
       const [wx, wy] = toWorld(ev.clientX, ev.clientY);
       let w = Math.max(min[0], ow + wx - sx), h = Math.max(min[1], oh + wy - sy);
@@ -363,13 +383,16 @@ const Board = (() => {
       it.w = Math.round(w); it.h = Math.round(h);
       place(it);
       if (it.type === 'map' || it.type === 'lens') refreshSoon(id);
+      if (it.type === 'note') syncFrames([it]);
+      Cards[it.type]?.fit?.(nodes.get(id), it);
       drawLinks();
-    }, () => { refresh(id); commit(); });
+    }, () => { refresh(id); syncFrames(); commit(); });
   }
 
-  function startMarquee(e) {
+  function startMarquee(e, frame = null) {
     const r = B.getBoundingClientRect(), sx = e.clientX, sy = e.clientY;
     const base = e.shiftKey ? new Set(sel) : new Set();
+    const [px, py] = toWorld(sx, sy), hosts = new Set(S.items.filter(i => isFrame(i) && px >= i.x && px <= i.x + i.w && py >= i.y && py <= i.y + i.h).map(i => i.id));
     if (!e.shiftKey && (sel.size || selLink)) { sel.clear(); selLink = null; syncSel(); }
     if (edit) setEdit(null);
     track(e, ev => {
@@ -378,9 +401,50 @@ const Board = (() => {
       marq.style.cssText = `display:block;left:${x - r.left}px;top:${y - r.top}px;width:${w}px;height:${h}px`;
       const [ax, ay] = toWorld(x, y), [bx, by] = toWorld(x + w, y + h);
       sel.clear(); base.forEach(i => sel.add(i));
-      for (const it of S.items) if (it.x < bx && it.x + it.w > ax && it.y < by && it.y + it.h > ay) sel.add(it.id);
+      // frames, and notes the sweep started inside, only count when fully enclosed, so you can sweep inside one without grabbing it
+      for (const it of S.items) if (it.type === 'group' || hosts.has(it.id) ? inside(it, { x: ax, y: ay, w: bx - ax, h: by - ay }) : it.x < bx && it.x + it.w > ax && it.y < by && it.y + it.h > ay) sel.add(it.id);
       for (const [id, n] of nodes) n.classList.toggle('selected', sel.has(id));
-    }, () => { if (marq.style.display === 'block') { marq.style.display = 'none'; syncSel(); } });
+    }, () => {
+      if (marq.style.display === 'block') { marq.style.display = 'none'; syncSel(); }
+      else if (frame) { sel.add(frame); syncSel(); }
+    });
+  }
+
+  /* ---------- groups (frames) ---------- */
+  const inside = (a, g) => a !== g && a.x >= g.x && a.y >= g.y && a.x + a.w <= g.x + g.w && a.y + a.h <= g.y + g.h;
+  // notes frame things too: what lies inside one moves with it
+  const isFrame = i => i.type === 'group' || i.type === 'note';
+  /** Everything lying fully inside a frame or note, nested frames and their contents included. */
+  function contents(g) { return S.items.filter(i => inside(i, g)); }
+  /** Notes holding cards drop to a faint fill so what they frame stays readable. */
+  function syncFrames(list = itemsOf('note')) {
+    for (const it of list) {
+      const n = nodes.get(it.id);
+      if (n && n.classList.contains('framing') !== n.classList.toggle('framing', contents(it).length > 0)) Cards.note.fit(n, it);
+    }
+  }
+  function frameRect(list, fs) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const it of list) { x0 = Math.min(x0, it.x); y0 = Math.min(y0, it.y); x1 = Math.max(x1, it.x + it.w); y1 = Math.max(y1, it.y + it.h); }
+    fs = fs || Math.round(clamp(Math.max(x1 - x0, y1 - y0) * 0.028, 18, 180));
+    const pad = Math.round(fs * 1.4), head = Math.round(fs * 2.2);
+    return { fs, x: Math.round(x0 - pad), y: Math.round(y0 - pad - head), w: Math.round(x1 - x0 + 2 * pad), h: Math.round(y1 - y0 + 2 * pad + head) };
+  }
+  /** G: frame the selection, sized to it. A lone selected frame is tidied to fit what it holds. */
+  function group(ids) {
+    const list = ids.map(getItem).filter(Boolean);
+    if (!list.length) return toast('Select cards or notes, then press G to frame them.');
+    if (list.length === 1 && list[0].type === 'group') return fitGroup(list[0]);
+    const g = add({ type: 'group', title: '', color: NOTE_COLORS[0], ...frameRect(list) });
+    select([g.id]); commit();
+    setTimeout(() => Cards.note.edit(nodes.get(g.id)), 30);
+    return g;
+  }
+  function fitGroup(g) {
+    const list = contents(g);
+    if (!list.length) return toast('Nothing inside this frame to fit.');
+    Object.assign(g, frameRect(list));
+    refresh(g.id); commit();
   }
 
   /* ---------- pen / eraser ---------- */
@@ -501,18 +565,19 @@ const Board = (() => {
 
   /* ---------- creation helpers ---------- */
   function newNote(x, y, text = '') {
-    return add({ type: 'note', x, y, w: 220, h: 180, text, color: NOTE_COLORS[Math.floor(Math.random() * NOTE_COLORS.length)], rot: round(Math.random() * 4 - 2, 1), fs: 24 });
+    return add({ type: 'note', x, y, w: 240, h: 140, text, color: NOTE_COLORS[0] });
   }
-  function newText(x, y, text = '') { return add({ type: 'text', x, y, w: 380, h: 70, text, fs: 40 }); }
+  function newText(x, y, text = '') { return add({ type: 'text', x, y, w: 380, h: 70, text }); }
 
   /* ---------- dbl-click / context menu ---------- */
   function onDbl(e) {
     if (e.target.closest('input,textarea,select,button,[contenteditable="true"],.no-drag')) return;
     const card = e.target.closest('.card');
-    if (card) { const it = getItem(card.dataset.id); Cards[it.type]?.dbl?.(e, it, card); return; }
+    // double-clicking a frame's open area drops a note into it, like the bare board
+    if (card && !(card.classList.contains('card-group') && !e.target.closest('.group-head'))) { const it = getItem(card.dataset.id); Cards[it.type]?.dbl?.(e, it, card); return; }
     if (tool !== 'select') return;
     const [x, y] = toWorld(e.clientX, e.clientY);
-    const it = newNote(x - 110, y - 30);
+    const it = newNote(x - 120, y - 30);
     select([it.id]); commit();
     setTimeout(() => Cards.note.edit(nodes.get(it.id)), 30);
   }
@@ -520,13 +585,13 @@ const Board = (() => {
   function onCtx(e) {
     if (e.target.closest('input,textarea,[contenteditable="true"]')) return;
     e.preventDefault();
-    const card = e.target.closest('.card');
+    const card = e.target.closest('.card') || nodes.get(frameAt(e)?.id);
     const [wx, wy] = toWorld(e.clientX, e.clientY);
     if (!card) {
       return Menu.show(e.clientX, e.clientY, [
         { label: 'Import scans here…', icon: 'upload', kbd: 'I', action: () => App.pickFiles([wx, wy]) },
         { label: 'New lens here', icon: 'lens', kbd: 'L', action: () => App.newLens([wx, wy]) },
-        { label: 'Sticky note', icon: 'note', kbd: 'N', action: () => { const n = newNote(wx, wy); select([n.id]); commit(); setTimeout(() => Cards.note.edit(nodes.get(n.id)), 30); } },
+        { label: 'Note', icon: 'note', kbd: 'N', action: () => { const n = newNote(wx, wy); select([n.id]); commit(); setTimeout(() => Cards.note.edit(nodes.get(n.id)), 30); } },
         { label: 'Text label', icon: 'text', kbd: 'T', action: () => { const n = newText(wx, wy); select([n.id]); commit(); setTimeout(() => Cards.note.edit(nodes.get(n.id)), 30); } },
         '-',
         { label: 'Fit everything', icon: 'fit', kbd: 'F', action: () => fit() },
@@ -540,6 +605,7 @@ const Board = (() => {
     const lenses = itemsOf('lens');
     const common = [
       '-',
+      it.type !== 'group' && { label: 'Group in a frame', icon: 'frame', kbd: 'G', action: () => group(ids) },
       { label: 'Duplicate', icon: 'copy', kbd: 'Ctrl D', action: () => duplicate(ids) },
       { label: 'Bring to front', icon: 'layers', kbd: ']', action: () => zOrder(ids, true) },
       { label: 'Send to back', icon: 'layers', kbd: '[', action: () => zOrder(ids, false) },
@@ -552,7 +618,7 @@ const Board = (() => {
     if (it.type === 'map') {
       items = [
         { header: maps.length > 1 ? `${maps.length} maps` : (it.meta.title || 'Map') },
-        { label: 'Compare in a new lens', icon: 'lens', kbd: 'G', action: () => App.compare(ids) },
+        { label: 'Compare in a new lens', icon: 'lens', kbd: '⇧ G', action: () => App.compare(ids) },
         ...lenses.map(l => ({ label: `Add to “${l.title || 'Lens'}”`, icon: 'plus', action: () => addToLens(l, maps.map(m => m.id)) })),
         { label: 'Pin on the map', icon: 'pin', action: () => Atlas.pinFromBoard(id) },
         { label: 'Edit lines', icon: 'sculpt', action: () => setEdit({ id, mode: 'sculpt', r: 0.09 }) },
@@ -576,8 +642,14 @@ const Board = (() => {
         { label: 'Export SVG', icon: 'download', action: () => App.exportSVG(id) },
         { label: 'Export CSV (incl. averages)', icon: 'download', action: () => App.exportLensCSV(it) },
       ];
-    } else if (it.type === 'note') {
-      items = [{ header: 'Note' }, { custom: el('div', { class: 'm-swatches' }, NOTE_COLORS.map(c => el('button', { style: { background: c }, onclick: () => { ids.forEach(i => { const x = getItem(i); if (x.type === 'note') { x.color = c; fill(x); } }); commit(); Menu.hide(); } }))) }];
+    } else if (it.type === 'note' || it.type === 'group') {
+      const tint = el('div', { class: 'm-swatches' }, NOTE_COLORS.map(c => el('button', { style: { background: c }, onclick: () => { ids.forEach(i => { const x = getItem(i); if (x.type === it.type) { x.color = c; fill(x); } }); commit(); Menu.hide(); } })));
+      items = it.type === 'note' ? [{ header: 'Note' }, { custom: tint }] : [
+        { header: it.title || 'Frame' }, { custom: tint },
+        { label: 'Fit to contents', icon: 'fit', kbd: 'G', action: () => fitGroup(it) },
+        { label: 'Select contents', icon: 'select', action: () => select(contents(it).map(i => i.id)) },
+        { label: 'Ungroup (remove frame)', icon: 'x', action: () => remove([id]) },
+      ];
     }
     Menu.show(e.clientX, e.clientY, [...items, ...common]);
   }
@@ -599,7 +671,7 @@ const Board = (() => {
     const act = {
       v: () => setTool('select'), h: () => setTool('hand'), p: () => setTool('pen'), e: () => setTool('eraser'),
       n: () => setTool('note'), t: () => setTool('text'), c: () => setTool('connect'),
-      l: () => App.newLens(), g: () => App.compare([...sel]), f: () => fit([...sel]), i: () => App.pickFiles(),
+      l: () => App.newLens(), g: () => e.shiftKey ? App.compare([...sel]) : group([...sel]), f: () => fit([...sel]), i: () => App.pickFiles(),
       0: () => zoomTo100(), '=': () => zoomBy(1.2), '+': () => zoomBy(1.2), '-': () => zoomBy(1 / 1.2),
       ']': () => zOrder([...sel], true), '[': () => zOrder([...sel], false), '?': () => Help.open(),
       delete: () => { if (selLink) { S.links = S.links.filter(l => l.id !== selLink); selLink = null; drawLinks(); commit(); } else remove([...sel]); },
@@ -613,7 +685,7 @@ const Board = (() => {
       e.preventDefault();
       const step = e.shiftKey ? 24 : 4;
       for (const id of sel) { const it = getItem(id); if (it.locked) continue; it.x += arrows[0] * step; it.y += arrows[1] * step; place(it); }
-      drawLinks(); commitSoon();
+      drawLinks(); syncFrames(); commitSoon();
     }
   }
   const commitSoon = debounce(commit, 400);
@@ -626,7 +698,7 @@ const Board = (() => {
   return {
     init, applyView, toWorld, centerWorld, zoomBy, zoomTo100, fit, animateTo,
     build, place, fill, refresh, refreshSoon, redrawPlot, rebuildAll, add, remove, duplicate, addToLens,
-    select, syncSel, setTool, setEdit, drawInk, drawLinks, highlight, newNote, newText,
+    select, syncSel, setTool, setEdit, drawInk, drawLinks, highlight, newNote, newText, group, fitGroup, contents,
     node: id => nodes.get(id), selection: () => [...sel],
     get edit() { return edit; }, get tool() { return tool; }, pen,
   };
