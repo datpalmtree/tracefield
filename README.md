@@ -87,7 +87,7 @@ An exported project contains the recordings, participant labels, quotes and exac
 
 ### Limits
 
-- The free backgrounds use Esri's public tile services and Mapzen terrain tiles. Check Esri's terms before a commercial or high-traffic deployment.
+- The map uses Esri's public tile services and Mapzen terrain tiles. Check Esri's terms if you plan to use it for a commercial or high-traffic deployment.
 
 ## Layout
 
