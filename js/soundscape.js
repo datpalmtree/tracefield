@@ -287,6 +287,11 @@ const Scape = (() => {
     if (!v) return;
     for (const c of [v.a, v.b]) if (c && isFinite(c.el.duration)) c.el.currentTime = clamp(u, 0, 0.999) * c.el.duration;
     v.u = clamp(u, 0, 1);
+    // a jump starts from silence and eases back in (~0.2 s), so the sound never cuts in sharply
+    if (v.playing) {
+      const g = v.level.gain, t = ctx.currentTime;
+      g.cancelScheduledValues(t); g.setValueAtTime(0, t); g.setTargetAtTime(v.target, t + 0.01, 0.07);
+    }
   }
 
   function drop(id) {

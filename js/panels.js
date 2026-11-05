@@ -202,8 +202,8 @@ const Inspector = (() => {
         UI.field('Stroke', UI.range(v.width, 1, 8, 0.2, x => { v.width = x; up(); }, x => x.toFixed(1))),
         it.asset && UI.field('Scan ghost underneath', UI.range(v.ghost, 0, 1, 0.01, x => { v.ghost = x; up(); }, pct)),
         UI.row(UI.check(v.points, 'Points', x => { v.points = x; up(); }), UI.check(v.grid, 'Grid', x => { v.grid = x; up(); }), UI.check(v.ticks, 'Values', x => { v.ticks = x; up(); })),
-        UI.field('Playhead sweep', UI.range(v.dur, 2, 40, 1, x => { v.dur = x; }, x => x + ' s')),
       ]),
+      UI.section('Sound', soundForm(it, v), false),
       UI.section('Axes & calibration', axesForm(it.axes, up, true), false),
       UI.section('Readings', readings(it)),
       UI.section('Actions', [el('div', { class: 'btn-grid' },
@@ -214,6 +214,22 @@ const Inspector = (() => {
         UI.btn('Export PNG', 'download', () => App.exportPNG(it.id)),
         UI.btn('Duplicate', 'copy', () => Board.duplicate([it.id])),
         UI.btn('Delete', 'trash', () => Board.remove([it.id]), 'danger'))]),
+    ];
+  }
+
+  /** Sonify toggle + sweep for this graph, then the effect sliders, which every graph shares. */
+  function soundForm(it, o) {
+    return [
+      UI.check(o.sound, 'Sonify — hear each line as a pitch', x => { o.sound = x; x ? Sound.ensure() : Sound.silence(); Board.refresh(it.id, false); }),
+      UI.field('Playhead sweep', UI.range(o.dur, 2, 40, 1, x => { o.dur = x; }, x => x + ' s')),
+      ...soundFx(),
+    ];
+  }
+  function soundFx() {
+    const fx = S.settings.soundFx;
+    return [
+      UI.hint('Effects for every graph’s sound.'),
+      SOUND_FX.map(([k, label]) => UI.field(label, UI.range(fx[k] || 0, 0, 1, 0.01, x => { fx[k] = x; Sound.applyFx(); }, x => (x ? (x === 1 ? 'Intense' : pct(x)) : 'Off')))),
     ];
   }
 
@@ -231,9 +247,20 @@ const Inspector = (() => {
         UI.color(col, c => {
           if (o.colorBy === 'map') { s.map.color = c; Board.refreshSoon(s.map.id); } else S.colorRules[o.colorBy][v] = c;
           itemsOf('lens').forEach(l => Board.refreshSoon(l.id));
+          if (o.colorBy === 'participant') { itemsOf('map').forEach(m => Board.fill(m)); Library.render(); }
         }),
         el('button', { type: 'button', class: 'lg-l', onclick: () => { it.mute = it.mute || {}; muted ? delete it.mute[mk] : (it.mute[mk] = true); Board.refresh(it.id, false); commit(); show(); } }, v));
     }));
+  }
+  /** Colour + dash per average line, kept on this lens. */
+  function avgStyles(it, D) {
+    const o = it.opts;
+    if (!o.avg || !D.agg.size) return null;
+    const set = (k, g, v) => { (o[k] = o[k] || {})[g] = v; Board.refreshSoon(it.id); };
+    return el('div', { class: 'legend' }, el('span', { class: 'f-l' }, 'Average lines'), [...D.agg].map(([g, a]) => el('div', { class: 'lg' },
+      UI.color(a.color, c => set('avgColor', g, c)),
+      el('span', { class: 'lg-l' }, g),
+      el('select', { class: 'mini-select', value: String(a.dash % Plot.DASH_NAMES.length), onchange: e => { set('avgDash', g, +e.target.value); commit(); } }, Plot.DASH_NAMES.map((n, i) => el('option', { value: i }, n))))));
   }
 
   function insights(it, D) {
@@ -327,11 +354,12 @@ const Inspector = (() => {
         UI.field('Stroke', UI.range(o.width, 0.6, 6, 0.1, x => { o.width = x; up(); }, x => x.toFixed(1))),
         UI.field('Line opacity', UI.range(o.opacity, 0.05, 1, 0.01, x => { o.opacity = x; up(); }, pct)),
         UI.row(UI.check(o.grid, 'Grid', x => { o.grid = x; up(); }), UI.check(o.ticks, 'Values', x => { o.ticks = x; up(); })),
-        UI.field('Playhead sweep', UI.range(o.dur, 2, 40, 1, x => { o.dur = x; }, x => x + ' s')),
       ]),
+      UI.section('Sound', soundForm(it, o), false),
       UI.section('Merge & compare', [
         UI.row(UI.check(o.avg, 'Average line', x => { o.avg = x; up(); }), UI.check(o.showLines, 'Individual lines', x => { o.showLines = x; up(); })),
         UI.field('Average per', UI.select(o.groupBy, GROUP_BY, x => { o.groupBy = x; upx(); })),
+        avgStyles(it, D),
         UI.field('Spread band', UI.seg(o.band, [['none', 'None'], ['sd', '±1 SD'], ['minmax', 'Min–max']], x => { o.band = x; up(); })),
         UI.field('Consensus pull — morph lines into their average', UI.range(o.pull, 0, 1, 0.01, x => { o.pull = x; Board.redrawPlot(it.id); }, pct)),
         UI.field('Normalise', UI.select(o.normalize, [['none', 'None (raw)'], ['minmax', 'Stretch each line 0–1'], ['center', 'Centre on own mean'], ['start', 'Align starting values']], x => { o.normalize = x; upx(); })),
@@ -385,11 +413,23 @@ const Inspector = (() => {
   function noteForm(it) {
     const up = () => Board.refreshSoon(it.id);
     return [
-      head(it.color || 'var(--text)', it.type === 'note' ? 'Sticky note' : 'Text', (it.text || '').slice(0, 40) || 'Empty', 'Double-click on the board to edit the text'),
+      head(it.color || 'var(--text)', it.type === 'note' ? 'Note' : 'Text', (it.text || '').slice(0, 40) || 'Empty', it.type === 'note' ? 'Text fits itself to the box · a big note frames what is under it' : 'Double-click on the board to edit the text'),
       UI.field('Text', UI.area(it.text, x => { it.text = x; up(); }, { rows: 4 })),
-      UI.field('Size', UI.range(it.fs || 24, 12, 120, 1, x => { it.fs = x; up(); }, x => x + 'px')),
-      UI.field('Colour', UI.swatches(it.color, it.type === 'note' ? NOTE_COLORS : [...PALETTE.slice(0, 6), '#f4f1ea'], c => { it.color = c; up(); commit(); })),
+      UI.field(it.type === 'note' ? 'Colour — border and tint' : 'Colour', UI.swatches(it.color, it.type === 'note' ? NOTE_COLORS : [...PALETTE.slice(0, 6), '#f4f1ea'], c => { it.color = c; up(); commit(); })),
       el('div', { class: 'btn-grid' }, UI.btn('Duplicate', 'copy', () => Board.duplicate([it.id])), UI.btn('Delete', 'trash', () => Board.remove([it.id]), 'danger')),
+    ];
+  }
+
+  function groupForm(it) {
+    const up = () => Board.refreshSoon(it.id), inner = Board.contents(it);
+    return [
+      head(it.color || NOTE_COLORS[0], 'Frame', it.title || 'Untitled group', `${inner.length} item${inner.length === 1 ? '' : 's'} inside · they move with the frame`),
+      UI.field('Title', UI.text(it.title, x => { it.title = x; up(); })),
+      UI.field('Tint', UI.swatches(it.color, NOTE_COLORS, c => { it.color = c; up(); commit(); })),
+      el('div', { class: 'btn-grid' },
+        UI.btn('Fit to contents', 'fit', () => Board.fitGroup(it), 'primary'),
+        UI.btn('Select contents', 'select', () => Board.select(inner.map(i => i.id))),
+        UI.btn('Ungroup', 'x', () => Board.remove([it.id]), 'danger')),
     ];
   }
 
@@ -415,6 +455,7 @@ const Inspector = (() => {
       head(Theme.t().accent, 'Selection', `${list.length} items`, counts),
       el('div', { class: 'btn-grid' },
         maps.length > 0 && UI.btn(`Compare ${maps.length} map${maps.length > 1 ? 's' : ''}`, 'lens', () => App.compare(maps.map(m => m.id)), 'primary'),
+        UI.btn('Group in frame', 'frame', () => Board.group(list.map(i => i.id))),
         scans.length > 1 && UI.btn(`Stack ${scans.length} scans`, 'layers', () => App.stackScans(scans)),
         UI.btn('Arrange in grid', 'grid', () => arrange(list)),
         UI.btn('Zoom to', 'fit', () => Board.fit(list.map(i => i.id))),
@@ -454,13 +495,14 @@ const Inspector = (() => {
         UI.check(st.snap, 'Snap cards to grid', x => { st.snap = x; }),
         UI.field('Theme', UI.seg(st.theme, [['dark', 'Night'], ['light', 'Paper']], x => App.setTheme(x))),
       ]),
+      UI.section('Graph sound', soundFx(), false),
       UI.section('Moves', [el('ul', { class: 'keys' },
-        [['Middle-drag / Space-drag', 'pan the board'], ['Wheel', 'zoom at cursor'], ['Drag map → lens', 'add it to the comparison'], ['G', 'compare selected maps'], ['Double-click scan', 'digitize'], ['Double-click board', 'sticky note'], ['P / C', 'pen · string between cards'], ['?', 'all shortcuts']]
+        [['Middle-drag / Space-drag', 'pan the board'], ['Wheel', 'zoom at cursor'], ['Drag map → lens', 'add it to the comparison'], ['G', 'frame the selection'], ['Shift G', 'compare selected maps'], ['Double-click scan', 'digitize'], ['Double-click board', 'note'], ['P / C', 'pen · string between cards'], ['?', 'all shortcuts']]
           .map(([k, d]) => el('li', {}, el('kbd', {}, k), el('span', {}, d))))], false),
     ];
   }
 
-  const forms = { map: mapForm, lens: lensForm, scan: scanForm, note: noteForm, text: noteForm };
+  const forms = { map: mapForm, lens: lensForm, scan: scanForm, note: noteForm, text: noteForm, group: groupForm };
   return { init, show, axesForm };
 })();
 
@@ -494,18 +536,18 @@ const Library = (() => {
     root.innerHTML = '';
     const groups = new Map();
     for (const m of maps) {
-      const g = group === 'none' ? '' : group === 'tag' ? ((m.meta.tags || [])[0] || 'untagged') : group === 'session' ? (m.meta.session ? 'Test ' + m.meta.session : 'No test #') : (m.meta[group] || `No ${group}`);
+      const g = group === 'none' ? '' : group === 'tag' ? ((m.meta.tags || [])[0] || 'untagged') : group === 'session' ? (sessionLabel(m.meta.session, 'Test ') || 'No test #') : (m.meta[group] || `No ${group}`);
       if (!groups.has(g)) groups.set(g, []);
       groups.get(g).push(m);
     }
     const sorted = [...groups.entries()].sort((a, b) => String(a[0]).localeCompare(String(b[0]), undefined, { numeric: true }));
     for (const [g, list] of sorted) {
-      if (g) root.append(el('div', { class: 'lib-g' }, g, el('small', {}, list.length)));
+      if (g) root.append(el('div', { class: 'lib-g' }, el('span', {}, group === 'participant' && el('i', { class: 'p-dot', style: { background: participantColor(list[0]) } }), g), el('small', {}, list.length)));
       list.sort((a, b) => String(a.meta.session).localeCompare(String(b.meta.session), undefined, { numeric: true }));
       for (const m of list) {
         const row = el('div', { class: 'lib-row' + (Board.selection().includes(m.id) ? ' on' : ''), draggable: 'true', title: Atlas.active ? 'Click to pin at the map centre · drag onto the map or a point' : 'Click to find · drag onto a lens' },
           el('span', { class: 'swatch', style: { background: m.color } }),
-          el('div', { class: 'lib-t' }, el('b', {}, m.meta.title || 'Untitled'), el('small', {}, [m.meta.participant, m.meta.session && 'Test ' + m.meta.session, m.meta.condition].filter(Boolean).join(' · ') || '—')),
+          el('div', { class: 'lib-t' }, el('b', {}, m.meta.title || 'Untitled'), el('small', {}, [m.meta.participant, sessionLabel(m.meta.session, 'Test '), m.meta.condition].filter(Boolean).join(' · ') || '—')),
           el('span', { class: 'lib-lines' }, m.lines.map(l => el('i', { style: { background: l.color }, title: l.name }))));
         row.addEventListener('click', () => { if (Atlas.active) return Atlas.focusItem(m.id); Board.select([m.id]); Board.fit([m.id]); });
         row.addEventListener('dblclick', () => m.asset && Digitizer.open({ mapId: m.id }));

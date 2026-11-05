@@ -312,7 +312,7 @@ const Plot = (() => {
       case 'line': return s.line.key || s.line.name || '—';
       case 'map': return m.title || s.map.id;
       case 'participant': return m.participant || '—';
-      case 'session': return m.session ? 'Session ' + m.session : '—';
+      case 'session': return sessionLabel(m.session, 'Session ') || '—';
       case 'condition': return m.condition || '—';
       case 'tag': return (m.tags || [])[0] || '—';
       case 'all': return 'All';
@@ -355,8 +355,10 @@ const Plot = (() => {
     for (const [g, list] of groups) {
       const a = aggregate(list.map(s => s.pts));
       if (!a.rows.length) continue;
-      a.color = o.groupBy === o.colorBy || (o.groupBy === 'line' && o.colorBy === 'ink') ? list[0].color
-        : o.groupBy === 'all' ? Theme.t().text : colorFor(o.groupBy, g);
+      // colour and dash can be set per average in the inspector; by default each average gets the next dash style
+      a.color = o.avgColor?.[g] || (o.groupBy === o.colorBy || (o.groupBy === 'line' && o.colorBy === 'ink') ? list[0].color
+        : o.groupBy === 'all' ? Theme.t().text : colorFor(o.groupBy, g));
+      a.dash = o.avgDash?.[g] ?? agg.size;
       a.n = list.length;
       agg.set(g, a);
     }
@@ -368,6 +370,10 @@ const Plot = (() => {
     for (const s of series) s.q = quantize(s.pts, o.qx, o.qy);
     return { maps, series, agg };
   }
+  const DASHES = [null, [4, 2.5], [1, 2.2], [6, 2, 1, 2], [2.5, 2.5], [8, 3]];
+  const DASH_NAMES = ['Solid', 'Dashed', 'Dotted', 'Dash-dot', 'Short dash', 'Long dash'];
+  /** Dash pattern i, scaled to the stroke width. */
+  function dashFor(i, w) { const d = DASHES[i % DASHES.length]; return d ? d.map(x => round(x * Math.max(1.5, w), 1)).join(' ') : null; }
 
   function heatImage(list, W = 220, H = 130) {
     const acc = new Float32Array(W * H);
@@ -442,7 +448,7 @@ const Plot = (() => {
       D.maps.forEach((m, i) => {
         const base = F.pt + rowH * (i + 1.25);
         g.append(sv('line', { x1: F.pl, x2: F.pl + F.pw, y1: base, y2: base, stroke: T.grid }));
-        const lab = [m.meta.participant, m.meta.session && 'S' + m.meta.session].filter(Boolean).join(' · ') || m.meta.title;
+        const lab = [m.meta.participant, sessionLabel(m.meta.session, 'S')].filter(Boolean).join(' · ') || m.meta.title;
         g.append(txt(F.pl - 10, base - 3, lab.slice(0, 18), { fill: T.text, 'font-size': 11.5, 'text-anchor': 'end', 'font-weight': 600 }));
         if (m.meta.condition) g.append(txt(F.pl - 10, base + 10, m.meta.condition.slice(0, 18), { fill: T.faint, 'font-size': 10, 'text-anchor': 'end' }));
         const Fr = { ...F, Y: v => base - v * amp };
@@ -496,7 +502,7 @@ const Plot = (() => {
       if (o.avg && mode === 'overlay') {
         for (const [k, a] of D.agg) {
           const P = quantize(a.mean, o.qx, o.qy);
-          drawSeries(g, P, F, { color: a.color, width: lineW * 1.9 + 1.5, curve: o.curve === 'ink' ? 'smooth' : o.curve, qx: o.qx, pid, key: 'avg:' + k, halo: true, opacity: focus && focus !== k ? 0.25 : 1 });
+          drawSeries(g, P, F, { color: a.color, width: lineW * 1.9 + 1.5, dash: dashFor(a.dash, lineW * 1.9 + 1.5), curve: o.curve === 'ink' ? 'smooth' : o.curve, qx: o.qx, pid, key: 'avg:' + k, halo: true, opacity: focus && focus !== k ? 0.25 : 1 });
           const end = P[P.length - 1];
           const right = end && F.X(end[0]) > F.pl + F.pw - 90;
           if (end && D.agg.size <= 8) g.append(txt(F.X(end[0]) + (right ? -4 : 6), F.Y(end[1]) + (right ? -9 : 4), `${k === 'All' ? 'mean' : k} · n${a.n}`, { fill: a.color, 'font-size': 11, 'font-weight': 700, 'pointer-events': 'none', 'paint-order': 'stroke', stroke: T.card, 'stroke-width': 3, 'text-anchor': right ? 'end' : 'start' }));
@@ -514,7 +520,7 @@ const Plot = (() => {
 
   function seriesLabel(s) {
     const m = s.map.meta;
-    return [m.participant || m.title, m.session && 'S' + m.session, s.line.name].filter(Boolean).join(' · ');
+    return [m.participant || m.title, sessionLabel(m.session, 'S'), s.line.name].filter(Boolean).join(' · ');
   }
 
   /* ---------- hover / playhead overlays ---------- */
@@ -541,33 +547,62 @@ const Plot = (() => {
 
   return {
     effective, normalize, quantize, valueAt, aggregate, stats, similarity, toX, toY, fmtX, fmtY,
-    frame, renderMap, renderLens, lensData, lensMaps, fieldValue, seriesLabel, cursor, pathFor,
+    frame, renderMap, renderLens, lensData, lensMaps, fieldValue, seriesLabel, cursor, pathFor, dashFor, DASH_NAMES,
   };
 })();
 
 /* =====================================================================
    Sound — each visible line becomes a voice (pitch = value)
    ===================================================================== */
+/** Effect sliders for graph sound, 0 = off … 1 = intense; one setting for every graph. */
+const SOUND_FX = [['gain', 'Emphasis'], ['bright', 'Brightness'], ['space', 'Space'], ['delay', 'Delay']];
 const Sound = {
-  ctx: null, master: null, voices: [],
+  ctx: null, master: null, fx: null, voices: [], shaped: null,
   ensure() {
     if (!this.ctx) {
       const AC = window.AudioContext || window.webkitAudioContext;
       if (!AC) return false;
-      this.ctx = new AC();
-      this.master = this.ctx.createGain(); this.master.gain.value = 0.55;
-      const comp = this.ctx.createDynamicsCompressor();
-      this.master.connect(comp); comp.connect(this.ctx.destination);
+      const c = this.ctx = new AC();
+      this.master = c.createGain(); this.master.gain.value = 0.55;
+      const comp = c.createDynamicsCompressor();
+      this.master.connect(comp); comp.connect(c.destination);
+      // voices → emphasis → brightness (saturation adds overtones) → dry + reverb + delay
+      const emph = c.createGain(), shape = c.createWaveShaper(), send = c.createGain(), verb = c.createConvolver();
+      const echoIn = c.createGain(), echo = c.createDelay(1), echoTone = c.createBiquadFilter(), echoBack = c.createGain();
+      shape.oversample = '2x'; send.gain.value = 0; echoIn.gain.value = 0; echo.delayTime.value = 0.32; echoBack.gain.value = 0;
+      echoTone.type = 'lowpass'; echoTone.frequency.value = 3500;
+      const len = Math.round(c.sampleRate * 2.6), ir = c.createBuffer(2, len, c.sampleRate);
+      for (let ch = 0; ch < 2; ch++) { const d = ir.getChannelData(ch); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len) ** 3; }
+      verb.buffer = ir;
+      emph.connect(shape); shape.connect(this.master); shape.connect(send); send.connect(verb); verb.connect(this.master);
+      shape.connect(echoIn); echoIn.connect(echo); echo.connect(echoTone); echoTone.connect(echoBack); echoBack.connect(echo); echo.connect(this.master);
+      this.fx = { emph, shape, send, echoIn, echoBack };
+      this.applyFx();
     }
     if (this.ctx.state === 'suspended') this.ctx.resume();
     return true;
+  },
+  /** Set the effects from the sliders (S.settings.soundFx). */
+  applyFx() {
+    if (!this.fx) return;
+    const v = { gain: 0, bright: 0, space: 0, delay: 0, ...S.settings.soundFx }, t = this.ctx.currentTime, f = this.fx;
+    f.emph.gain.setTargetAtTime(10 ** (v.gain * 9 / 20), t, 0.05);
+    if (this.shaped !== v.bright) {
+      this.shaped = v.bright;
+      const k = v.bright * 12, n = 1024, curve = new Float32Array(n);
+      for (let i = 0; i < n; i++) { const x = i / (n - 1) * 2 - 1; curve[i] = k ? Math.tanh(x * (1 + k)) / Math.tanh(1 + k) : x; }
+      f.shape.curve = curve;
+    }
+    f.send.gain.setTargetAtTime(v.space * 0.9, t, 0.05);
+    f.echoIn.gain.setTargetAtTime(v.delay * 0.7, t, 0.05);
+    f.echoBack.gain.setTargetAtTime(v.delay * 0.62, t, 0.05);
   },
   voicesFor(n) {
     const c = this.ctx;
     while (this.voices.length < n) {
       const o = c.createOscillator(), g = c.createGain(), p = c.createStereoPanner ? c.createStereoPanner() : null;
       o.type = 'triangle'; g.gain.value = 0;
-      o.connect(g); (p ? (g.connect(p), p.connect(this.master)) : g.connect(this.master));
+      o.connect(g); (p ? (g.connect(p), p.connect(this.fx.emph)) : g.connect(this.fx.emph));
       o.start();
       this.voices.push({ o, g, p });
     }
