@@ -37,6 +37,8 @@
     <symbol id="i-scan" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/></symbol>
     <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5v15l12.5-7.5z" fill="currentColor"/></symbol>
     <symbol id="i-pause" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14" stroke-width="3"/></symbol>
+    <symbol id="i-prev" viewBox="0 0 24 24"><path d="M18 5.5v13L9 12z" fill="currentColor"/><path d="M6.5 5.5v13" stroke-width="2.4"/></symbol>
+    <symbol id="i-next" viewBox="0 0 24 24"><path d="M6 5.5v13l9-6.5z" fill="currentColor"/><path d="M17.5 5.5v13" stroke-width="2.4"/></symbol>
     <symbol id="i-sound" viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4zM15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></symbol>
     <symbol id="i-mute" viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4zM22 9l-6 6M16 9l6 6"/></symbol>
     <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></symbol>
@@ -156,6 +158,13 @@
     <h2 id="gc-name"></h2>
     <em id="gc-who"></em>
     <p id="gc-quote"></p>
+    <div id="gc-ctl">
+      <button class="ibtn" id="gc-prev" title="Previous stop (←)" aria-label="Previous stop"><svg class="ic"><use href="#i-prev"/></svg></button>
+      <button class="ibtn" id="gc-hold" title="Stay here (P)" aria-label="Pause or resume this stop"><svg class="ic"><use href="#i-pause"/></svg></button>
+      <button class="ibtn" id="gc-next" title="Next stop (→)" aria-label="Next stop"><svg class="ic"><use href="#i-next"/></svg></button>
+      <button class="ibtn" id="gc-end" title="End the journey (Esc)" aria-label="End the journey"><svg class="ic"><use href="#i-x"/></svg></button>
+      <span>Scroll to zoom · drag to look around</span>
+    </div>
   </div>
   <button class="btn" id="geo-exit"><svg class="ic"><use href="#i-x"/></svg><span>Exit exhibit</span></button>
   <div id="geo-intro" class="modal" hidden>
@@ -312,7 +321,7 @@
           <p>Use the <b>background</b> button at the top left to swap the pinboard for streets, satellite or the Earth globe, or Google Maps and Google Earth 3D with your API key.</p>
           <p>Drop a sound file on the map to make a <b>point</b>, or outline a <b>region</b>. Drag graphs from the library to pin them, then link anything with arrows, lines or flows. Link a graph to a sound and its lines can drive tempo, emphasis, brightness and space as it plays.</p>
           <h4>7 · Listen</h4>
-          <p><b>Soundwalk</b> fades each place in as you move near it. <b>Journey</b> flies along your arrows, stop by stop. <b>Exhibit</b> hides the tools for visitors. Hold <kbd>Space</kbd> to flip between the recording and how it felt.</p>
+          <p><b>Soundwalk</b> fades each place in as you move near it. <b>Journey</b> flies along your arrows, stop by stop: scroll to zoom, drag to look around, <kbd>←</kbd> <kbd>→</kbd> to change stop, <kbd>P</kbd> to stay a while, or play any point to jump there. <b>Exhibit</b> hides the tools for visitors. Hold <kbd>Space</kbd> to flip between the recording and how it felt.</p>
           <ul class="keys">
             <li><kbd>A</kbd> <kbd>R</kbd> <kbd>C</kbd><span>point · region · link</span></li>
             <li><kbd>W</kbd> <kbd>J</kbd> <kbd>X</kbd><span>soundwalk · journey · exhibit</span></li>

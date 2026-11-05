@@ -131,9 +131,10 @@ const Geo = (() => {
       },
       unproject(x, y) { const l = map.unproject([x, y]); return [l.lng, l.lat]; },
       camera() { const c = map.getCenter(); return { lng: c.lng, lat: c.lat, zoom: map.getZoom(), pitch: map.getPitch(), bearing: map.getBearing() }; },
-      flyTo(c, ms) { map.flyTo({ center: [c.lng, c.lat], zoom: c.zoom, pitch: c.pitch, bearing: c.bearing, duration: ms, essential: true }); },
+      flyTo(c, ms) { map.flyTo({ center: [c.lng, c.lat], zoom: c.zoom, pitch: c.pitch, bearing: c.bearing, offset: c.offset || [0, 0], duration: ms, essential: true }); },
       zoomBy(k) { map.easeTo({ zoom: map.getZoom() + Math.log2(k), duration: 220 }); },
-      orbit(deg) { map.setBearing(map.getBearing() + deg); },
+      // setBearing is a jump, and a jump cancels any running zoom or flight; so wait until the camera is still
+      orbit(deg) { if (!map.isMoving()) map.setBearing(map.getBearing() + deg); },
       fit(b, pad, maxZoom) { map.fitBounds([[b[0], b[1]], [b[2], b[3]]], { padding: pad, duration: 1100, maxZoom, essential: true }); },
       destroy() { map.remove(); box.remove(); },
     };

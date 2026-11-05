@@ -745,6 +745,11 @@ body.atlas-on .panel { bottom: 34px; }
 #geo-caption h2 { margin: 2px 0; font-size: 30px; letter-spacing: -.02em; line-height: 1.1; }
 #geo-caption em { font-style: normal; font-size: 12.5px; opacity: .8; }
 #geo-caption p { margin: 8px 0 0; font: 500 24px/1.2 var(--hand); }
+#gc-ctl { display: flex; align-items: center; gap: 2px; margin: 12px 0 -4px -6px; pointer-events: auto; }
+#gc-ctl .ibtn { color: rgba(255, 255, 255, .8); }
+#gc-ctl .ibtn:hover { color: #fff; background: rgba(255, 255, 255, .14); }
+#gc-ctl .ibtn:disabled { opacity: .35; pointer-events: none; }
+#gc-ctl span { margin-left: 10px; font-size: 11.5px; opacity: .6; }
 
 /* exhibit */
 #geo-exit { position: absolute; z-index: 6; top: 16px; right: 16px; display: none; }

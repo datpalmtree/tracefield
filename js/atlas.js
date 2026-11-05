@@ -46,6 +46,10 @@ const Atlas = (() => {
       seek(e); track(e, seek);
     });
     $('#geo-exit').onclick = () => exhibit(false);
+    $('#gc-prev').onclick = () => Journey.next(-1);
+    $('#gc-hold').onclick = () => Journey.hold();
+    $('#gc-next').onclick = () => Journey.next();
+    $('#gc-end').onclick = () => Journey.stop();
     $('#gi-journey').onclick = () => { $('#geo-intro').hidden = true; Scape.ensure(); Journey.start(); };
     $('#gi-walk').onclick = () => { $('#geo-intro').hidden = true; Scape.ensure(); setWalk(true); };
     $('#gk-save').onclick = saveKey;
@@ -221,7 +225,11 @@ const Atlas = (() => {
     const gone = a.pins.filter(p => ids.has(p.item)).map(p => p.id);
     a.pins = a.pins.filter(p => !ids.has(p.item));
     a.links = a.links.filter(l => !gone.includes(l.a) && !gone.includes(l.b));
-    for (const p of a.places) if (ids.has(p.drive?.graph)) { p.drive = defaultDrive(); Scape.refresh(p); }
+    for (const p of a.places) {
+      const kept = p.drive?.byGraph;
+      if (kept) for (const id of ids) delete kept[id];
+      if (ids.has(p.drive?.graph)) { p.drive = { ...defaultDrive(), byGraph: kept }; Scape.refresh(p); }
+    }
     if (active) rebuild();
   }
 
@@ -543,13 +551,29 @@ const Atlas = (() => {
   }
 
   function setDriveGraph(p, itemId) {
-    p.drive = fillDrive(p.drive || defaultDrive());
-    p.drive.graph = itemId || null;
+    const d = p.drive = fillDrive(p.drive || defaultDrive());
+    itemId = itemId || null;
+    if (d.graph === itemId) return;
+    // remember the setup for the graph being left, so switching back restores it exactly
+    const saved = d.byGraph = d.byGraph || {}, keys = DRIVE_TARGETS.map(([k]) => k);
+    const was = d.graph, old = graphLines(getItem(was));
+    if (was) saved[was] = Object.fromEntries(keys.map(k => [k, { ...d[k] }]));
+    d.graph = itemId;
     const lines = graphLines(getItem(itemId));
-    const pick = (re, not) => (lines.find(l => re.test(l.name) && l.id !== not) || null)?.id || null;
-    p.drive.tempo.line = pick(/pace|tempo|time|speed|felt|passage/i) || lines[0]?.id || null;
-    p.drive.gain.line = pick(/emph|loud|salien|intens|sound|attention/i, p.drive.tempo.line) || null;
-    for (const k of ['bright', 'space', 'delay']) p.drive[k].line = null;
+    if (itemId && saved[itemId]) {
+      for (const k of keys) d[k] = { ...d[k], ...saved[itemId][k] };
+    } else if (was) {
+      // first time on this graph: keep every setting; each line carries over by name, else by position
+      for (const k of keys) {
+        const i = old.findIndex(l => l.id === d[k].line);
+        d[k].line = i < 0 ? null : (lines.find(l => l.name === old[i].name) || lines[i] || lines[0])?.id || null;
+      }
+    } else {
+      const pick = (re, not) => (lines.find(l => re.test(l.name) && l.id !== not) || null)?.id || null;
+      d.tempo.line = pick(/pace|tempo|time|speed|felt|passage/i) || lines[0]?.id || null;
+      d.gain.line = pick(/emph|loud|salien|intens|sound|attention/i, d.tempo.line) || null;
+      for (const k of ['bright', 'space', 'delay']) d[k].line = null;
+    }
     Scape.refresh(p);
   }
 
@@ -651,6 +675,8 @@ const Atlas = (() => {
   /* ---------- playback ---------- */
   function toggle(p) {
     if (!p) return;
+    // on a journey, the current stop pauses and resumes; any other stop becomes the current one
+    if (Journey.on) { if (Journey.list[Journey.i]?.id === p.id) Journey.hold(); else Journey.go(p.id); return; }
     if (Scape.isPlaying(p.id) && !walkOn) { Scape.pause(p.id); clearPlayheads(); showDock(); return; }
     if (walkOn) setWalk(false);
     Scape.stopAll();
@@ -674,12 +700,17 @@ const Atlas = (() => {
     }
   }
 
+  /** True when this graph is the one reshaping the place's sound right now (not merely linked to it). */
+  const shapes = (v, itemId) => v.driven && v.place.drive?.graph === itemId && DRIVE_TARGETS.some(([k]) => v.place.drive[k]?.line);
+
   function updatePlayheads() {
-    const seen = new Set();
+    // every linked graph shows where we are listening; only the graph driving the sound is lit
+    const seen = new Set(), lit = new Set();
     for (const v of Scape.voices.values()) {
       if (!v.playing) continue;
       const st = Scape.state(v.place.id);
       for (const pin of pinsFor(v.place)) {
+        if (shapes(v, pin.item)) lit.add(pin.id);
         if (seen.has(pin.id)) continue;
         const ctx = nodes.get(pin.id)?.querySelector('.gn-plot')?._ctx;
         if (!ctx?.play) continue;
@@ -688,7 +719,7 @@ const Atlas = (() => {
       }
     }
     for (const pin of A().pins) {
-      nodes.get(pin.id)?.classList.toggle('spot', seen.has(pin.id));
+      nodes.get(pin.id)?.classList.toggle('spot', lit.has(pin.id));
       if (seen.has(pin.id)) continue;
       const ctx = nodes.get(pin.id)?.querySelector('.gn-plot')?._ctx;
       if (ctx?.play?.firstChild) ctx.play.innerHTML = '';
@@ -929,7 +960,7 @@ const Atlas = (() => {
 
   /* ---------- journey ---------- */
   const Journey = {
-    on: false, list: [], i: 0, timer: 0, token: 0,
+    on: false, list: [], i: 0, timer: 0, token: 0, held: false, due: 0, left: 0, bias: 0, aim: null, landed: 0,
     /** Places in story order: follow arrows and flows, passing through graphs, then anything left. */
     route(from) {
       const a = A(), next = new Map(), incoming = new Set();
@@ -953,14 +984,14 @@ const Atlas = (() => {
       if (!Scape.ensure()) return;
       setWalk(false);
       Scape.stopAll();
-      Object.assign(this, { on: true, list, i: -1 });
+      Object.assign(this, { on: true, list, i: -1, held: false, bias: 0, aim: null });
       $('#btn-journey').classList.add('on');
       root.classList.add('journeying');
       this.next();
     },
     stop() {
       if (!this.on) return;
-      this.on = false; this.token++;
+      this.on = false; this.held = false; this.token++;
       clearTimeout(this.timer);
       Scape.stopAll();
       $('#btn-journey').classList.remove('on');
@@ -971,29 +1002,81 @@ const Atlas = (() => {
     },
     next(step = 1) {
       this.i += step;
-      if (this.i >= this.list.length || this.i < 0) { this.stop(); toast('End of the journey.'); return fitAll(); }
+      if (this.i < 0) this.i = 0;
+      if (this.i >= this.list.length) { this.stop(); toast('End of the journey.'); return fitAll(); }
       const p = this.list[this.i], tok = ++this.token;
       clearTimeout(this.timer);
       Scape.stopAll();
-      const [lng, lat] = anchor(p), c = Geo.camera();
-      const zoom = clamp(Math.log2(EARTH_C * Math.cos(lat * DEG) / (512 * Math.max(40, p.radius) / 170)), 2, 17.5);
-      Geo.flyTo({ lng, lat, zoom, pitch: 58, bearing: (c?.bearing || 0) + 35 }, 3400);
+      // a zoom the listener chose at the last stop carries on to the next ones
+      const c = Geo.camera();
+      if (c && this.aim != null && Geo.engine?.kind === 'libre' && performance.now() > this.landed && Math.abs(c.zoom - this.aim) > 0.15) this.bias = clamp(this.bias + c.zoom - this.aim, -4, 3);
       focus = p.id;
+      this.held = false; this.due = 0;
       for (const q of A().places) nodes.get(q.id)?.classList.toggle('spot', q === p);
       $('#gc-name').textContent = p.name || '';
       $('#gc-who').textContent = p.who || '';
       $('#gc-quote').textContent = p.quote || p.note || '';
       $('#gc-count').textContent = `${this.i + 1} / ${this.list.length}`;
       $('#geo-caption').hidden = false;
+      const shot = this.frameStop(p);
+      this.aim = shot.zoom; this.landed = performance.now() + 3500;
+      Geo.flyTo(shot, 3400);
+      this.controls();
       showDock();
-      this.timer = setTimeout(() => {
-        if (tok !== this.token) return;
-        if (hasSound(p) && Scape.play(p)) {
-          showDock();
-          const cap = (A().stopSecs || 40) * 1000;
-          this.timer = setTimeout(() => { if (tok === this.token) this.next(); }, cap);
-        } else this.timer = setTimeout(() => { if (tok === this.token) this.next(); }, 5000);
-      }, 2800);
+      this.timer = setTimeout(() => { if (tok === this.token) this.begin(p, (A().stopSecs || 40) * 1000); }, 2800);
+    },
+    /** Jump straight to a stop on the route. */
+    go(id) { const k = this.list.findIndex(q => q.id === id); if (k >= 0) this.next(k - this.i); },
+    /** Play the stop, and move on after `ms` unless the sound ends first. */
+    begin(p, ms) {
+      const tok = this.token;
+      if (hasSound(p) && Scape.play(p)) showDock(); else ms = Math.min(ms, 5000);
+      this.due = performance.now() + ms;
+      this.timer = setTimeout(() => { if (tok === this.token) this.next(); }, ms);
+      this.controls();
+    },
+    /** Pause on this stop (sound and timer), or carry on from where it was. */
+    hold() {
+      if (!this.on) return;
+      const p = this.list[this.i];
+      clearTimeout(this.timer);
+      if (this.held) { this.held = false; this.begin(p, this.left); }
+      else { this.held = true; this.left = this.due ? Math.max(1500, this.due - performance.now()) : (A().stopSecs || 40) * 1000; Scape.pause(p.id); }
+      this.controls(); showDock();
+    },
+    controls() {
+      const b = $('#gc-hold');
+      b.innerHTML = ic(this.held ? 'play' : 'pause');
+      b.title = this.held ? 'Carry on (P)' : 'Stay here (P)';
+      $('#gc-prev').disabled = this.i <= 0;
+      $('#gc-next').title = this.i >= this.list.length - 1 ? 'Finish the journey (→)' : 'Next stop (→)';
+    },
+    /** Where the camera goes for a stop: close enough that its graphs open full size, aimed so place and cards share the view. */
+    frameStop(p) {
+      const [lng, lat] = anchor(p), c = Geo.camera(), bearing = (c?.bearing || 0) + 35;
+      // the reach sets the zoom, but never so far out that a linked graph shrinks or collapses
+      // (a card is drawn full size at the zoom it was pinned at)
+      let zoom = Math.log2(EARTH_C * Math.cos(lat * DEG) / (512 * Math.max(40, p.radius) / 170));
+      const pins = A().links.map(l => l.a === p.id ? l.b : l.b === p.id ? l.a : null).map(pinOf).filter(Boolean);
+      for (const pin of pins) if (!pin.small && isFinite(pin.z0)) zoom = Math.max(zoom, pin.z0 - 0.3);
+      zoom = clamp(zoom + this.bias, 2, 18);
+      // bounding box of the place and its cards, in screen pixels around the place
+      const W = 512 * 2 ** zoom, my = y => Math.log(Math.tan(Math.PI / 4 + y * DEG / 2)) / (2 * Math.PI) * W, a = -bearing * DEG;
+      const box = [0, 0, 0, 0];
+      for (const pin of pins) {
+        const ex = (pin.lng - lng) / 360 * W, ey = my(lat) - my(pin.lat);
+        const ax = ex * Math.cos(a) - ey * Math.sin(a), ay = ex * Math.sin(a) + ey * Math.cos(a);
+        const k = clamp(2 ** ((zoom - (pin.z0 ?? zoom)) * 0.6), 0.22, 1), x = ax + pin.dx * k, y = ay + pin.dy * k;
+        box[0] = Math.min(box[0], x); box[1] = Math.min(box[1], y);
+        box[2] = Math.max(box[2], x + (pin.small ? 190 : pin.w * k)); box[3] = Math.max(box[3], y + (pin.small ? 40 : pin.h * k));
+      }
+      // centre that box in the open part of the screen: right of the caption, left of the inspector
+      const R = root.getBoundingClientRect(), cap = $('#geo-caption').getBoundingClientRect();
+      const right = exhibitOn || $('#inspector').classList.contains('collapsed') ? 0 : 370;
+      const left = Math.min(cap.right - R.left, R.width * 0.4);
+      const cx = (left + R.width - right) / 2 - R.width / 2, hw = R.width / 2 - 80, hh = R.height / 2 - 80;
+      const offset = [clamp(cx - (box[0] + box[2]) / 2, -hw, hw), clamp(-(box[1] + box[3]) / 2, -hh, hh)];
+      return { lng, lat, zoom, pitch: 50, bearing, offset };
     },
     ended(id) { if (this.on && this.list[this.i]?.id === id) { const tok = this.token; clearTimeout(this.timer); this.timer = setTimeout(() => { if (tok === this.token) this.next(); }, 1200); } },
     frame() { if (this.on && Scape.isPlaying(this.list[this.i]?.id) && !CALM) Geo.orbit(0.012); },
@@ -1031,6 +1114,7 @@ const Atlas = (() => {
       if (k === 'escape') { if (Journey.on) Journey.stop(); else if (!App.locked) exhibit(false); }
       if (k === 'arrowright' && Journey.on) Journey.next();
       if (k === 'arrowleft' && Journey.on) Journey.next(-1);
+      if (k === 'p' && Journey.on) Journey.hold();
       return;
     }
     const act = {
@@ -1041,6 +1125,7 @@ const Atlas = (() => {
       enter: () => { if (tool === 'region') finishRegion(); },
       arrowright: () => { if (Journey.on) Journey.next(); },
       arrowleft: () => { if (Journey.on) Journey.next(-1); },
+      p: () => { if (Journey.on) Journey.hold(); },
       escape: () => {
         if (Journey.on) return Journey.stop();
         if (walkOn) return setWalk(false);
