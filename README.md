@@ -2,7 +2,7 @@
 
 A browser-based lab for hand-drawn plot-maps. Scan paper questionnaires, digitize each drawn line into a data series, then label, overlay, average, sculpt and listen to them on an infinite pinboard, or place them on a map alongside the soundscapes they describe.
 
-The map side was built for one kind of study: participants map how they experienced the passage of time, and those graphs are used to re-design recorded soundscapes. The atlas lets people listen to those experiences where they happened.
+This project was built for a specific study where participants mapped how they experienced the passage of time in an environment, and those graphs are used to re-design recorded soundscapes. The atlas lets people listen to those experiences where they happened.
 
 ## Run
 
@@ -14,7 +14,7 @@ npx serve .
 
 Work auto-saves to the browser's IndexedDB. Use **Project → Export** for a portable `.tracefield` backup. Older `.json` exports still open. The map background needs an internet connection; the pinboard does not.
 
-To explore without your own data, choose **Sound map demo** on the welcome screen. Its sounds and quotes are synthetic.
+To explore without your own data, choose **Sound map demo** on the welcome screen. Its sounds are synthetic.
 
 ## The map
 
